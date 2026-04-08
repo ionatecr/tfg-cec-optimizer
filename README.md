@@ -19,15 +19,12 @@ Adicionalmente, la herramienta incorpora un módulo de análisis de almacenamien
 - **`core/`**:
   - `run_pipeline.py`: Orquesta la ejecución del modelo para cada configuración seleccionada por el usuario.
 - **`model/`**:
-  - `parameters.py`: Clase de parámetros del modelo, con tipado y validación.
-  - `schema.py`: Definición del esquema de datos esperado en los ficheros CSV de entrada.
-  - `validation.py`: Lógica de validación de los datos cargados por el usuario.
-  - `logging_config.py`: Configuración del sistema de logs de ejecución.
+  - `parameters.py`: Clase de parámetros del modelo, con tipado, validación y carga desde `parameters.yaml`.
+  - `validation.py`: Lógica de validación de los datos preparados (tipos, rangos, huecos temporales, etc.).
 - **`ui/`**:
   - `layouts.py`: Define la estructura de todas las pestañas y páginas de la interfaz.
   - `callbacks.py`: Implementa la lógica reactiva de la aplicación (gráficos, KPIs, exportación, etc.).
   - `components.py`: Componentes reutilizables de la interfaz (tarjetas, controles, tablas).
-  - `constants.py`: Constantes compartidas entre módulos de la interfaz.
 - **`assets/`**: Estilos CSS personalizados, logo y recursos estáticos de la aplicación.
 - **`inputs/`**: Datos de ejemplo incluidos en la distribución para explorar la herramienta sin necesidad de cargar ficheros propios. Contiene cuatro ficheros CSV: `perfiles_A.csv` (consumos horarios de 12 usuarios, año 2024), `pv_A.csv` (generación FV horaria), `precio_compra_2024.csv` y `precio_venta_2024.csv` (precios PVPC horarios de compra y venta). La ruta se configura en `parameters.yaml` bajo `paths.resources_dir`.
 

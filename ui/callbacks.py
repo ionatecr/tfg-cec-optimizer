@@ -968,7 +968,7 @@ def register_callbacks(app, cfg):
                         "Importación (kWh)":     imp_bat,
                         "cost_per_user":         pu_bat,
                         "users_display":         list(pu_bat.keys()),
-                        "battery_capacity_kwh":  float(bat_capacity or 50.0),
+                        "battery_capacity_kwh":  float(bat_capacity or 10.0),
                     })
                     if isinstance(ts_bat, pd.DataFrame) and not ts_bat.empty:
                         series[bat_label] = {
@@ -2291,7 +2291,12 @@ def register_callbacks(app, cfg):
 
         ts["soc_pct"] = (ts["soc_bat"] / bat_cap_kwh * 100.0).clip(0, 100)
 
-        soc_daily = (ts.set_index(tcol)["soc_pct"]
+        # Prepend initial SOC = 0 % (battery starts empty) one hour before the series
+        t0 = ts[tcol].iloc[0]
+        init_row = pd.DataFrame({tcol: [t0 - pd.Timedelta(hours=1)], "soc_pct": [0.0]})
+        ts_plot = pd.concat([init_row, ts[[tcol, "soc_pct"]]], ignore_index=True)
+
+        soc_daily = (ts_plot.set_index(tcol)["soc_pct"]
                        .resample("D").mean()
                        .dropna()
                        .reset_index())
