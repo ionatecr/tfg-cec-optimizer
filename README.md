@@ -115,6 +115,4 @@ Esta herramienta propone y evalúa un modelo de asignación dinámica que supera
 
 ## Licencia
 
-Este proyecto está licenciado bajo la [MIT License](LICENSE), permitiendo su uso, modificación y distribución.
-#   t f g - c e c - o p t i m i z e r  
- 
+Este proyecto está licenciado bajo la [MIT License](LICENSE), permitiendo su uso, modificación y distribución. 
