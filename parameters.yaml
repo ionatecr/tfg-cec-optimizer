@@ -1,0 +1,76 @@
+paths:
+  resources_dir: inputs
+
+experiment:
+  name: baseline
+
+optimization:
+  solver: gurobi
+  solver_fallbacks:
+    - cbc
+  tee: false
+
+validation:
+  strict: true
+  min_rows_after_merge: 24
+
+ex_ante:
+  mode: equal
+  fixed_coefficients: {}
+  normalize_if_needed: true
+  updates_per_year: 4
+  block_mode: month
+
+dynamic:
+  block_mode: hour
+
+battery:
+  enabled: false
+  capacity_kwh: 10.0
+  power_kw: 5.0
+  efficiency_charge: 0.95
+  efficiency_discharge: 0.95
+  initial_soc_fraction: 0
+
+io:
+  csv:
+    encoding: utf-8
+    fallback_encoding: latin-1
+    sep_primary: ","
+    sep_fallback: ";"
+  time:
+    dayfirst: false
+    utc: true
+    floor: h
+    drop_duplicates: true
+  detect:
+    time_patterns:
+      - "\\butc[_\\-\\s]*timestamp\\b"
+      - "\\btimestamp\\b"
+      - "\\bdatetime\\b"
+      - "\\bdate[_\\-\\s]*time\\b"
+      - "\\btime\\b"
+      - "\\bfecha\\b"
+    pv_preferred_cols:
+      - pv_kWh
+      - G_kWh
+      - pv
+      - gen
+      - generation
+    buy_preferred_cols:
+      - p_buy
+      - buy_eur_kWh
+      - price_buy
+      - buy_price
+    sell_preferred_cols:
+      - p_sell
+      - sell_eur_kWh
+      - price_sell
+      - sell_price
+    consumption_prefixes:
+      - cons_
+
+logging:
+  directory: logs
+  level: INFO
+  file_encoding: utf-8
