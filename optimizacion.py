@@ -13,7 +13,7 @@ from model.parameters import AppConfig, BatteryConfig
 _log = logging.getLogger("TFG")
 
 
-def _try_solver(name: str):
+def probar_solver(name):
     s = SolverFactory(name)
     _saved_out, _saved_err = sys.stdout, sys.stderr
     try:
@@ -23,134 +23,167 @@ def _try_solver(name: str):
     return s, ok
 
 
-def _select_solver(requested: str, fallbacks: list[str], logger):
+def elegir_solver(requested, fallbacks, logger):
     req = (requested or "").strip().lower()
-    order = [req] if req else []
-    order += [fb.strip().lower() for fb in (fallbacks or []) if fb]
+    order = []
+    if req:
+        order.append(req)
+    for fb in (fallbacks or []):
+        if fb:
+            order.append(fb.strip().lower())
     if not order:
         order = ["cbc"]
-    _log.debug(f"_select_solver: orden de preferencia = {order}")
     for name in order:
-        s, ok = _try_solver(name)
+        s, ok = probar_solver(name)
         if ok:
             logger.info(f"solver: '{name}' disponible y seleccionado")
             return s, name
         logger.warning(f"solver: '{name}' no disponible")
-    raise RuntimeError("No hay ningún solver disponible de la lista (requested + fallbacks).")
+    raise RuntimeError("Solver no disponible, prueba otro.")
 
 
 _BLOCK_FMT = {"hour": "%Y-%m-%d %H:00", "day": "%Y-%m-%d",
               "week": "%Y-%W",          "month": "%Y-%m"}
 
 
-def _blocks_from_block_mode(times: pd.Series, block_mode: str):
-    fmt    = _BLOCK_FMT.get(block_mode, "%Y-%m-%d")
-    labels = [ts.strftime(fmt) for ts in times]
-    uniq   = list(dict.fromkeys(labels))
-    b_map  = {t_idx + 1: uniq.index(labels[t_idx]) + 1 for t_idx in range(len(times))}
-    _log.debug(f"_blocks_from_block_mode: mode='{block_mode}', T={len(times)}, B={len(uniq)} bloques")
+def calcular_bloques(times, block_mode):
+    fmt = _BLOCK_FMT.get(block_mode, "%Y-%m-%d")
+
+    labels = []
+    for ts in times:
+        labels.append(ts.strftime(fmt))
+
+    uniq = []
+    for label in labels:
+        if label not in uniq:
+            uniq.append(label)
+
+    b_map = {}
+    for t_idx in range(len(times)):
+        b_map[t_idx + 1] = uniq.index(labels[t_idx]) + 1
+
     return list(range(1, len(uniq) + 1)), b_map
 
 
-def _segment_id_by_updates(times: pd.Series, updates_per_year: int):
+def calcular_segmentos(times, updates_per_year):
+    seg_of_t = {}
+
     if updates_per_year <= 0:
-        _log.debug(f"_segment_id_by_updates: updates_per_year={updates_per_year} → 1 segmento (rígido)")
-        return {i + 1: 1 for i in range(len(times))}, 1
+        for i in range(len(times)):
+            seg_of_t[i + 1] = 1
+        return seg_of_t, 1
+
     t0 = times.min()
     t1 = times.max()
     if pd.isna(t0) or pd.isna(t1):
-        _log.warning("_segment_id_by_updates: rango temporal inválido, usando 1 segmento")
-        return {i + 1: 1 for i in range(len(times))}, 1
+        _log.warning("calcular_segmentos: rango temporal inválido, usando 1 segmento")
+        for i in range(len(times)):
+            seg_of_t[i + 1] = 1
+        return seg_of_t, 1
+
     segments = int(updates_per_year)
     if segments <= 1:
-        _log.debug("_segment_id_by_updates: segments<=1 → 1 segmento")
-        return {i + 1: 1 for i in range(len(times))}, 1
+        for i in range(len(times)):
+            seg_of_t[i + 1] = 1
+        return seg_of_t, 1
 
     years = pd.Series(times.dt.year).dropna().unique()
     single_year = len(years) == 1
 
     if single_year and segments in {2, 3, 4, 6, 12}:
-        _log.debug(f"_segment_id_by_updates: año único, segmentación calendario con {segments} segmentos")
-        return {t_idx + 1: ((int(times.iloc[t_idx].month) - 1) // (12 // segments)) + 1
-                for t_idx in range(len(times))}, segments
+        for t_idx in range(len(times)):
+            mes = int(times.iloc[t_idx].month)
+            seg_of_t[t_idx + 1] = ((mes - 1) // (12 // segments)) + 1
+        return seg_of_t, segments
 
     span = (t1 - t0).total_seconds()
     if span <= 0:
-        return {i + 1: 1 for i in range(len(times))}, 1
+        for i in range(len(times)):
+            seg_of_t[i + 1] = 1
+        return seg_of_t, 1
+
     seg_len = span / segments
-    _log.debug(
-        f"_segment_id_by_updates: {len(years)} años, segmentación lineal "
-        f"({segments} segmentos, span={span/3600:.0f}h, seg_len={seg_len/3600:.1f}h)"
-    )
-
-    def seg_id_lin(ts):
-        k = int(((ts - t0).total_seconds()) // seg_len) + 1
-        return max(1, min(k, segments))
-
-    return {t_idx + 1: seg_id_lin(times.iloc[t_idx]) for t_idx in range(len(times))}, segments
+    for t_idx in range(len(times)):
+        k = int(((times.iloc[t_idx] - t0).total_seconds()) // seg_len) + 1
+        seg_of_t[t_idx + 1] = max(1, min(k, segments))
+    return seg_of_t, segments
 
 
-def _blocks_ex_ante(times: pd.Series, exante_block_mode: str, updates_per_year: int):
+def bloques_ex_ante(times, updates_per_year):
     if updates_per_year == 0:
-        _log.debug("_blocks_ex_ante: updates_per_year=0 → 1 bloque único (rígido anual)")
-        return [1], {i + 1: 1 for i in range(len(times))}
+        b_map = {}
+        for i in range(len(times)):
+            b_map[i + 1] = 1
+        return [1], b_map
 
-    seg_of_t, n_seg = _segment_id_by_updates(times, updates_per_year)
+    seg_of_t, n_seg = calcular_segmentos(times, updates_per_year)
 
-    labels = [str(seg_of_t[i + 1]) for i in range(len(times))]
-    uniq = list(dict.fromkeys(labels))
-    b_map = {t_idx + 1: uniq.index(labels[t_idx]) + 1 for t_idx in range(len(times))}
-    _log.debug(
-        f"_blocks_ex_ante: updates_per_year={updates_per_year}, "
-        f"segmentos={n_seg}, bloques finales={len(uniq)}"
-    )
+    labels = []
+    for i in range(len(times)):
+        labels.append(str(seg_of_t[i + 1]))
+
+    uniq = []
+    for label in labels:
+        if label not in uniq:
+            uniq.append(label)
+
+    b_map = {}
+    for t_idx in range(len(times)):
+        b_map[t_idx + 1] = uniq.index(labels[t_idx]) + 1
+
     return list(range(1, len(uniq) + 1)), b_map
 
 
-def _postprocess_alpha(
-    alpha_vals: dict,
-    b_of_t: dict[int, int],
-    T: int,
-    U: int,
-    g: dict,
-    cons: dict,
-) -> int:
-    """Fix alpha for degenerate blocks (G≥D or G≈0): set proportional to demand."""
-    b_to_t: dict[int, list[int]] = {}
+def corregir_alpha(alpha_vals, b_of_t, T, U, g, cons):
+    b_to_t = {}
     for t_idx in range(1, T + 1):
-        b_to_t.setdefault(b_of_t[t_idx], []).append(t_idx)
+        b = b_of_t[t_idx]
+        if b not in b_to_t:
+            b_to_t[b] = []
+        b_to_t[b].append(t_idx)
+
     n_deg = 0
     for b, times_b in b_to_t.items():
-        g_b = sum(g[t] for t in times_b)
-        d_b = sum(sum(cons[(u, t)] for u in range(1, U + 1)) for t in times_b)
+        g_b = 0.0
+        for t in times_b:
+            g_b += g[t]
+        d_b = 0.0
+        for t in times_b:
+            for u in range(1, U + 1):
+                d_b += cons[(u, t)]
+
+        # si FV es mayor o igual que la demanda o no hay FV el reparto es proporcional a la demanda
         if (g_b >= d_b or g_b <= 1e-6) and d_b > 0:
             n_deg += 1
             for u in range(1, U + 1):
-                alpha_vals[(u, b)] = sum(cons[(u, t)] for t in times_b) / d_b
+                demanda_u = 0.0
+                for t in times_b:
+                    demanda_u += cons[(u, t)]
+                alpha_vals[(u, b)] = demanda_u / d_b
     return n_deg
 
 
-def _solve_lp(
-    df: pd.DataFrame,
-    users: list[str],
-    b_of_t: dict[int, int],
-    B: int,
-    solver,
-    tee: bool,
-    logger,
-    step_num: int = 5,
-) -> tuple:
+def resolver_lp(df, users, b_of_t, B, solver, tee, logger, step_num=5):
     T = len(df)
     U = len(users)
     s = step_num
 
     logger.info(f"  [{s}.1] dimensiones: T={T} | U={U} | B={B} bloques | alpha={U*B} vars | self_v={U*T} vars")
 
-    cons    = {(u + 1, t + 1): float(df.loc[t, users[u]]) for u in range(U) for t in range(T)}
-    g       = {t + 1: float(df.loc[t, "G"])     for t in range(T)}
-    pbuy    = {t + 1: float(df.loc[t, "p_buy"]) for t in range(T)}
-    psell   = {t + 1: float(df.loc[t, "p_sell"])for t in range(T)}
-    b_param = {t + 1: int(b_of_t[t + 1])        for t in range(T)}
+    cons = {}
+    for u in range(U):
+        for t in range(T):
+            cons[(u + 1, t + 1)] = float(df.loc[t, users[u]])
+
+    g = {}
+    pbuy = {}
+    psell = {}
+    b_param = {}
+    for t in range(T):
+        g[t + 1]       = float(df.loc[t, "G"])
+        pbuy[t + 1]    = float(df.loc[t, "p_buy"])
+        psell[t + 1]   = float(df.loc[t, "p_sell"])
+        b_param[t + 1] = int(b_of_t[t + 1])
 
     g_total  = sum(g.values())
     d_total  = sum(cons.values())
@@ -204,33 +237,29 @@ def _solve_lp(
     obj_val = float(value(m.obj))
     logger.info(f"  [{s}.3] solver completado | obj={obj_val:.4f} €")
 
-    alpha_vals: dict[tuple[int, int], float] = {
-        (u, b): float(value(m.alpha[u, b]))
-        for u in range(1, U + 1)
-        for b in range(1, B + 1)
-    }
+    alpha_vals = {}
+    for u in range(1, U + 1):
+        for b in range(1, B + 1):
+            alpha_vals[(u, b)] = float(value(m.alpha[u, b]))
 
-    n_degenerate = _postprocess_alpha(alpha_vals, b_of_t, T, U, g, cons)
-    if n_degenerate:
-        logger.debug(f"  [{s}.3] alpha post-proceso: {n_degenerate} bloques degenerados (G>D) → proporcional a demanda")
+    corregir_alpha(alpha_vals, b_of_t, T, U, g, cons)
 
     for b in range(1, B + 1):
-        alpha_sum = sum(alpha_vals[(u, b)] for u in range(1, U + 1))
+        alpha_sum = 0.0
+        for u in range(1, U + 1):
+            alpha_sum += alpha_vals[(u, b)]
         if abs(alpha_sum - 1.0) > 0.01:
             logger.warning(f"  [{s}.3] WARN: alpha suma={alpha_sum:.4f} en bloque b={b} (esperado 1.0)")
-        else:
-            logger.debug(f"  bloque b={b}: sum(alpha)={alpha_sum:.4f} OK")
 
+    self_ts = []
+    imp_ts  = []
+    exp_ts  = []
+    cost_ts = []
+    per_user_self = {}
+    per_user_imp  = {}
     for u in range(1, U + 1):
-        alpha_u_mean = sum(alpha_vals[(u, b)] for b in range(1, B + 1)) / B
-        logger.debug(f"  usuario u{u}: alpha_medio={alpha_u_mean:.4f} (1/U esperado={1/U:.4f})")
-
-    self_ts: list[float] = []
-    imp_ts:  list[float] = []
-    exp_ts:  list[float] = []
-    cost_ts: list[float] = []
-    per_user_self: dict[int, list[float]] = {u: [] for u in range(1, U + 1)}
-    per_user_imp:  dict[int, list[float]] = {u: [] for u in range(1, U + 1)}
+        per_user_self[u] = []
+        per_user_imp[u]  = []
 
     for t in range(1, T + 1):
         g_t      = float(df.loc[t - 1, "G"])
@@ -286,21 +315,21 @@ def _solve_lp(
     return self_ts, imp_ts, exp_ts, cost_ts, alpha_vals, per_user_self, per_user_imp
 
 
-def _solve_lp_with_battery(
-    df: pd.DataFrame,
-    users: list[str],
-    b_of_t: dict[int, int],
-    B: int,
-    bat_cap: float,
-    bat_pow: float,
-    eta_c: float,
-    eta_d: float,
-    soc_init: float,
+def resolver_lp_bateria(
+    df,
+    users,
+    b_of_t,
+    B,
+    bat_cap,
+    bat_pow,
+    eta_c,
+    eta_d,
+    soc_init,
     solver,
-    tee: bool,
+    tee,
     logger,
-    step_num: int = 7,
-) -> tuple:
+    step_num=7,
+):
     T = len(df)
     U = len(users)
     s = step_num
@@ -314,11 +343,26 @@ def _solve_lp_with_battery(
         f"vars_bat={3 * T} (charge+discharge+SOC)"
     )
 
-    cons    = {(u + 1, t + 1): float(df.loc[t, users[u]]) for u in range(U) for t in range(T)}
-    g       = {t + 1: float(df.loc[t, "G"])     for t in range(T)}
-    pbuy    = {t + 1: float(df.loc[t, "p_buy"]) for t in range(T)}
-    psell   = {t + 1: float(df.loc[t, "p_sell"])for t in range(T)}
-    b_param = {t + 1: int(b_of_t[t + 1])        for t in range(T)}
+    cons = {}
+    for u in range(U):
+        for t in range(T):
+            cons[(u + 1, t + 1)] = float(df.loc[t, users[u]])
+
+    g = {}
+    for t in range(T):
+        g[t + 1] = float(df.loc[t, "G"])
+
+    pbuy = {}
+    for t in range(T):
+        pbuy[t + 1] = float(df.loc[t, "p_buy"])
+
+    psell = {}
+    for t in range(T):
+        psell[t + 1] = float(df.loc[t, "p_sell"])
+
+    b_param = {}
+    for t in range(T):
+        b_param[t + 1] = int(b_of_t[t + 1])
 
     m = ConcreteModel()
     m.U = RangeSet(1, U)
@@ -397,13 +441,12 @@ def _solve_lp_with_battery(
     obj_val = float(value(m.obj))
     logger.info(f"  [{s}.3] solver completado | obj={obj_val:.4f} €")
 
-    alpha_vals: dict[tuple[int, int], float] = {
-        (u, b): float(value(m.alpha[u, b]))
-        for u in range(1, U + 1)
-        for b in range(1, B + 1)
-    }
+    alpha_vals = {}
+    for u in range(1, U + 1):
+        for b in range(1, B + 1):
+            alpha_vals[(u, b)] = float(value(m.alpha[u, b]))
 
-    n_deg_bat = _postprocess_alpha(alpha_vals, b_of_t, T, U, g, cons)
+    n_deg_bat = corregir_alpha(alpha_vals, b_of_t, T, U, g, cons)
     if n_deg_bat:
         logger.debug(f"  [{s}.3] alpha post-proceso batería: {n_deg_bat} bloques degenerados → proporcional a demanda")
 
@@ -414,8 +457,11 @@ def _solve_lp_with_battery(
     charge_ts:   list[float] = []
     discharge_ts: list[float] = []
     soc_ts:      list[float] = []
-    per_user_self: dict[int, list[float]] = {u: [] for u in range(1, U + 1)}
-    per_user_imp:  dict[int, list[float]] = {u: [] for u in range(1, U + 1)}
+    per_user_self = {}
+    per_user_imp = {}
+    for u in range(1, U + 1):
+        per_user_self[u] = []
+        per_user_imp[u] = []
 
     for t in range(1, T + 1):
         g_t      = float(df.loc[t - 1, "G"])
@@ -466,21 +512,30 @@ def _solve_lp_with_battery(
     )
 
 
-def _fixed_reparto(df: pd.DataFrame, users: list[str], logger) -> tuple:
+def reparto_fijo(df, users, logger):
     T = len(df)
     U = len(users)
 
-    dem_per_u  = {i + 1: float(df[u].sum()) for i, u in enumerate(users)}
+    dem_per_u = {}
+    for i, u in enumerate(users):
+        dem_per_u[i + 1] = float(df[u].sum())
+
     dem_global = sum(dem_per_u.values())
-    alpha_fx   = {
-        i + 1: dem_per_u[i + 1] / dem_global if dem_global > 0 else 1.0 / U
-        for i in range(U)
-    }
+
+    alpha_fx = {}
+    for i in range(U):
+        if dem_global > 0:
+            alpha_fx[i + 1] = dem_per_u[i + 1] / dem_global
+        else:
+            alpha_fx[i + 1] = 1.0 / U
     p_buy_fx  = float(df["p_buy"].mean())
     p_sell_fx = float(df["p_sell"].mean())
 
+    partes = []
+    for i in range(U):
+        partes.append(f"u{i+1}={alpha_fx[i+1]:.3f}")
     logger.info(
-        "  [fx] α: " + " | ".join(f"u{i+1}={alpha_fx[i+1]:.3f}" for i in range(U)) +
+        "  [fx] α: " + " | ".join(partes) +
         f" | p_buy_medio={p_buy_fx:.4f} | p_sell_medio={p_sell_fx:.4f}"
     )
 
@@ -488,8 +543,11 @@ def _fixed_reparto(df: pd.DataFrame, users: list[str], logger) -> tuple:
     imp_ts  = []
     exp_ts  = []
     cost_ts = []
-    pu_self = {i + 1: [] for i in range(U)}
-    pu_imp  = {i + 1: [] for i in range(U)}
+    pu_self = {}
+    pu_imp = {}
+    for i in range(U):
+        pu_self[i + 1] = []
+        pu_imp[i + 1] = []
 
     for t in range(T):
         g_t   = float(df.loc[t, "G"])
@@ -530,7 +588,6 @@ def optimizar(
     solver_name        = solver_name        or cfg.optimization.solver
     dynamic_block_mode = dynamic_block_mode or cfg.dynamic.block_mode
     updates_per_year   = int(cfg.ex_ante.updates_per_year)
-    exante_block_mode  = str(cfg.ex_ante.block_mode)
 
     run_battery = battery_cfg is not None and battery_cfg.enabled
 
@@ -570,7 +627,6 @@ def optimizar(
         pu_imp_fx      = _base_state["pu_imp_fx"]
         p_buy_fx       = _base_state["p_buy_fx"]
         p_sell_fx      = _base_state["p_sell_fx"]
-        exante_block_mode  = _base_state["exante_block_mode"]
         updates_per_year   = _base_state["updates_per_year"]
         dynamic_block_mode = _base_state["dynamic_block_mode"]
     else:
@@ -597,31 +653,31 @@ def optimizar(
             raise ValueError("Datos vacíos tras preprocess.")
 
         logger.info("[4/7] CONFIGURACIÓN")
-        solver, solver_used = _select_solver(solver_name, cfg.optimization.solver_fallbacks, logger)
+        solver, solver_used = elegir_solver(solver_name, cfg.optimization.solver_fallbacks, logger)
         tee = bool(cfg.optimization.tee)
 
-        b_list_ex, b_of_t_ex   = _blocks_ex_ante(df["Time"], exante_block_mode, updates_per_year)
-        b_list_dyn, b_of_t_dyn = _blocks_from_block_mode(df["Time"], str(dynamic_block_mode))
+        b_list_ex, b_of_t_ex   = bloques_ex_ante(df["Time"], updates_per_year)
+        b_list_dyn, b_of_t_dyn = calcular_bloques(df["Time"], str(dynamic_block_mode))
         B_ex  = len(b_list_ex)
         B_dyn = len(b_list_dyn)
 
         logger.info(f"  [4.1] datos: T={T} | U={U} | D_total={df['D_total'].sum():.1f} kWh | G_total={df['G'].sum():.1f} kWh")
         logger.info(f"  [4.2] solver: '{solver_used}' | tee={tee}")
-        logger.info(f"  [4.3] ex ante: {B_ex} bloques (updates_per_year={updates_per_year}, mode='{exante_block_mode}')")
+        logger.info(f"  [4.3] ex ante: {B_ex} bloques (updates_per_year={updates_per_year})")
         logger.info(f"  [4.4] dinámico: {B_dyn} bloques (mode='{dynamic_block_mode}')")
 
         logger.info("[5/7] OPTIMIZACIÓN EX ANTE")
         (self_ex_ts, imp_ex_ts, exp_ex_ts, cost_ex_ts,
-         alpha_ex, pu_self_ex, pu_imp_ex) = _solve_lp(df, users, b_of_t_ex, B_ex, solver, tee, logger, step_num=5)
+         alpha_ex, pu_self_ex, pu_imp_ex) = resolver_lp(df, users, b_of_t_ex, B_ex, solver, tee, logger, step_num=5)
 
         logger.info("[6/7] OPTIMIZACIÓN DINÁMICA")
         (self_dyn_ts, imp_dyn_ts, exp_dyn_ts, cost_dyn_ts,
-         alpha_dyn, pu_self_dyn, pu_imp_dyn) = _solve_lp(df, users, b_of_t_dyn, B_dyn, solver, tee, logger, step_num=6)
+         alpha_dyn, pu_self_dyn, pu_imp_dyn) = resolver_lp(df, users, b_of_t_dyn, B_dyn, solver, tee, logger, step_num=6)
 
         logger.info("[6.5/7] REPARTO FIJO PROPORCIONAL (baseline)")
         (self_fx_ts, imp_fx_ts, exp_fx_ts, cost_fx_ts,
          alpha_fx, pu_self_fx, pu_imp_fx,
-         p_buy_fx, p_sell_fx) = _fixed_reparto(df, users, logger)
+         p_buy_fx, p_sell_fx) = reparto_fijo(df, users, logger)
     if run_battery:
         bat_cap  = float(battery_cfg.capacity_kwh)
         bat_pow  = float(battery_cfg.power_kw)
@@ -631,7 +687,7 @@ def optimizar(
         logger.info("[6.7/7] OPTIMIZACIÓN DINÁMICA + BATERÍA")
         (self_bat_ts, imp_bat_ts, exp_bat_ts, cost_bat_ts,
          charge_bat_ts, discharge_bat_ts, soc_bat_ts,
-         alpha_bat, pu_self_bat, pu_imp_bat) = _solve_lp_with_battery(
+         alpha_bat, pu_self_bat, pu_imp_bat) = resolver_lp_bateria(
             df, users, b_of_t_dyn, B_dyn,
             bat_cap, bat_pow, eta_c, eta_d, soc_init,
             solver, tee, logger, step_num=7,
@@ -729,7 +785,13 @@ def optimizar(
             f"→ {'OK' if bat_ok else f'WARN dif={abs(sum_pu_bat-cost_bat_total):.2f} €'}"
         )
 
-    display_names = {u: f"Usuario {i + 1}" for i, u in enumerate(users)}
+    display_names = {}
+    for i, u in enumerate(users):
+        display_names[u] = f"Usuario {i + 1}"
+
+    alpha_fixed_per_user = {}
+    for i in range(U):
+        alpha_fixed_per_user[users[i]] = alpha_fx[i + 1]
 
     summary: dict = {
         "cost_ex_ante":   cost_ex_ante,
@@ -754,7 +816,7 @@ def optimizar(
         "cost_per_user_fixed":     cost_pu_fx,
         "self_per_user_fixed":     self_pu_fx,
         "imp_per_user_fixed":      imp_pu_fx,
-        "alpha_fixed_per_user":    {users[i]: alpha_fx[i + 1] for i in range(U)},
+        "alpha_fixed_per_user":    alpha_fixed_per_user,
 
         "battery_enabled":         run_battery,
         "cost_bat":                cost_bat_total,
@@ -770,7 +832,6 @@ def optimizar(
         "bat_power_kw":            battery_cfg.power_kw       if run_battery else None,
 
         "exante_updates_per_year": int(updates_per_year),
-        "exante_block_mode":       str(exante_block_mode),
         "dynamic_block_mode":      str(dynamic_block_mode),
         "B_ex":      int(B_ex),
         "B_dynamic": int(B_dyn),
@@ -861,7 +922,6 @@ def optimizar(
             "exp_fx_ts": exp_fx_ts,   "cost_fx_ts": cost_fx_ts,
             "alpha_fx": alpha_fx, "pu_self_fx": pu_self_fx, "pu_imp_fx": pu_imp_fx,
             "p_buy_fx": p_buy_fx, "p_sell_fx": p_sell_fx,
-            "exante_block_mode": exante_block_mode,
             "updates_per_year": updates_per_year,
             "dynamic_block_mode": str(dynamic_block_mode),
         }

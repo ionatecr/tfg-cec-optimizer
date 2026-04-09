@@ -1,4 +1,4 @@
-datetime,precio_eur_kwh
+datetime,p_sell_eur_kwh
 2024-01-01 00:00,0.06333
 2024-01-01 01:00,0.05009
 2024-01-01 02:00,0.0475

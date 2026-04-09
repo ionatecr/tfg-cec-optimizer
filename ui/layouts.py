@@ -18,7 +18,7 @@ PAGES = [
 _DEFAULT_PAGE = "config"
 
 
-def _chart_card(title: str, graph_id: str, height: int = 320, note: str = ""):
+def tarjeta_grafico(title: str, graph_id: str, height: int = 320, note: str = ""):
     children = [
         html.Div(
             [html.Div(title, className="chart-title")],
@@ -37,7 +37,7 @@ def _chart_card(title: str, graph_id: str, height: int = 320, note: str = ""):
     return dbc.Card(dbc.CardBody(children), className="chart-card mt-3")
 
 
-def _dmc_card(title: str, component, note: str = ""):
+def tarjeta_dmc(title: str, component, note: str = ""):
     children = [html.Div(title, className="chart-title")]
     if note:
         children.append(html.Div(note, className="chart-note mt-1"))
@@ -45,7 +45,7 @@ def _dmc_card(title: str, component, note: str = ""):
     return dbc.Card(dbc.CardBody(children), className="chart-card mt-3")
 
 
-def _sidebar():
+def barra_lateral():
     nav_items = []
     nav_items.append(html.Div("Análisis", className="sidebar-section-label"))
     for page_id, icon_cls, label in PAGES:
@@ -108,7 +108,7 @@ def _sidebar():
     )
 
 
-def _top_bar():
+def barra_superior():
     return html.Div(
         [
             html.Div(
@@ -135,7 +135,7 @@ def _top_bar():
     )
 
 
-def _battery_card():
+def tarjeta_bateria():
     return dbc.Card(
         dbc.CardBody([
             html.Div(
@@ -219,7 +219,7 @@ def _battery_card():
     )
 
 
-def _page_config():
+def pagina_config():
     return html.Div(
         [
             html.Div("Tipo de tarifa", className="section-title"),
@@ -280,7 +280,7 @@ def _page_config():
     )
 
 
-def _page_comparativa():
+def pagina_comparativa():
     return html.Div(
         [
             dbc.Row(
@@ -310,7 +310,7 @@ def _page_comparativa():
                     ),
                     dbc.Col(
                         html.Div([
-                            _dmc_card(
+                            tarjeta_dmc(
                                 "Ahorro acumulado (%) vs referencia",
                                 dmc.AreaChart(
                                     id="chart-cumulative-pct",
@@ -327,7 +327,7 @@ def _page_comparativa():
                                     style={"height": "185px"},
                                 ),
                             ),
-                            _dmc_card(
+                            tarjeta_dmc(
                                 "Ahorro acumulado (€) vs referencia",
                                 dmc.AreaChart(
                                     id="chart-cumulative-eur",
@@ -370,7 +370,7 @@ def _page_comparativa():
     )
 
 
-def _page_usuarios():
+def pagina_usuarios():
     return html.Div(
         [
             html.Div("Coste por usuario", className="section-title"),
@@ -420,7 +420,7 @@ def _page_usuarios():
     )
 
 
-def _page_energia():
+def pagina_energia():
     return html.Div(
         [
             html.Div("Flujos de energía", className="section-title"),
@@ -430,7 +430,7 @@ def _page_energia():
             dbc.Row(
                 [
                     dbc.Col(
-                        _chart_card(
+                        tarjeta_grafico(
                             "Perfil de precios horario medio (€/kWh)",
                             "fig-explorer-price",
                             height=240),
@@ -502,14 +502,14 @@ def _page_energia():
     )
 
 
-def _param_row(label, component):
+def fila_param(label, component):
     return html.Div([
         html.Div(label, className="param-label"),
         component,
     ], className="mb-2")
 
 
-def _page_escenarios():
+def pagina_escenarios():
     return html.Div(
         [
             html.Div("Capacidad óptima y sensibilidad FV", className="section-title"),
@@ -651,35 +651,35 @@ def _page_escenarios():
                         dbc.CardBody([
                             html.Div("Parámetros de inversión en batería",
                                      className="chart-title mb-2"),
-                            _param_row("CAPEX batería (€/kWh)",
+                            fila_param("CAPEX batería (€/kWh)",
                                 dcc.Slider(id="bat-fin-cost-kwp", min=200, max=300, step=5,
                                            value=250,
                                            marks={i: f"{i}" for i in range(200, 301, 25)},
                                            tooltip={"always_visible": False},
                                            className="app-slider")),
-                            _param_row("Capacidad instalada",
+                            fila_param("Capacidad instalada",
                                 html.Div(id="bat-fin-capacity-display",
                                          style={"fontSize": "13px", "fontWeight": "700",
                                                 "color": "var(--text)", "paddingTop": "4px"})),
-                            _param_row("O&M anual (% CAPEX)",
+                            fila_param("O&M anual (% CAPEX)",
                                 dcc.Slider(id="bat-fin-om-pct", min=0, max=5.0, step=0.25,
                                            value=2.5,
                                            marks={0: "0%", 1: "1%", 2: "2%", 3: "3%", 4: "4%", 5: "5%"},
                                            tooltip={"always_visible": False},
                                            className="app-slider")),
-                            _param_row("Inflación precio eléctrico (%/año)",
+                            fila_param("Inflación precio eléctrico (%/año)",
                                 dcc.Slider(id="bat-fin-inflation", min=0, max=6, step=0.5,
                                            value=3.0,
                                            marks={0: "0%", 2: "2%", 3: "3%", 4: "4%", 6: "6%"},
                                            tooltip={"always_visible": False},
                                            className="app-slider")),
-                            _param_row("Tasa de descuento (%/año)",
+                            fila_param("Tasa de descuento (%/año)",
                                 dcc.Slider(id="bat-fin-discount", min=1, max=10, step=0.5,
                                            value=5.0,
                                            marks={1: "1%", 5: "5%", 8: "8%", 10: "10%"},
                                            tooltip={"always_visible": False},
                                            className="app-slider")),
-                            _param_row("Vida útil batería (años)",
+                            fila_param("Vida útil batería (años)",
                                 dcc.Slider(id="bat-fin-lifetime", min=5, max=25, step=1,
                                            value=15,
                                            marks={5: "5a", 10: "10a", 15: "15a", 20: "20a", 25: "25a"},
@@ -759,8 +759,8 @@ def _page_escenarios():
     )
 
 
-def _page_financiero():
-    def _param_row(label, component):
+def pagina_financiero():
+    def fila_param(label, component):
         return html.Div([
             html.Div(label, className="param-label"),
             component,
@@ -784,36 +784,36 @@ def _page_financiero():
                         dbc.CardBody([
                             html.Div("Parámetros de inversión", className="chart-title mb-3"),
 
-                            _param_row("CAPEX instalación FV (€/kWp)",
+                            fila_param("CAPEX instalación FV (€/kWp)",
                                 dbc.Input(id="fin-cost-kwp", type="number", value=1000,
                                           min=100, max=5000, step=50, className="param-input")),
 
-                            _param_row("Potencia instalada (kWp)",
+                            fila_param("Potencia instalada (kWp)",
                                 dbc.Input(id="fin-power-kwp", type="number", value=50.0,
                                           min=0.5, max=1000, step=0.5, className="param-input")),
 
-                            _param_row("Coste O&M anual (% del CAPEX)",
+                            fila_param("Coste O&M anual (% del CAPEX)",
                                 dcc.Slider(id="fin-om-pct", min=0.5, max=3.0, step=0.25,
                                            value=1.0,
                                            marks={0.5: "0.5%", 1: "1%", 2: "2%", 3: "3%"},
                                            tooltip={"always_visible": False},
                                            className="app-slider")),
 
-                            _param_row("Inflación precio eléctrico (% anual)",
+                            fila_param("Inflación precio eléctrico (% anual)",
                                 dcc.Slider(id="fin-inflation", min=0, max=6, step=0.5,
                                            value=3.0,
                                            marks={0: "0%", 2: "2%", 3: "3%", 4: "4%", 6: "6%"},
                                            tooltip={"always_visible": False},
                                            className="app-slider")),
 
-                            _param_row("Tasa de descuento (% anual)",
+                            fila_param("Tasa de descuento (% anual)",
                                 dcc.Slider(id="fin-discount", min=1, max=10, step=0.5,
                                            value=5.0,
                                            marks={1: "1%", 5: "5%", 8: "8%", 10: "10%"},
                                            tooltip={"always_visible": False},
                                            className="app-slider")),
 
-                            _param_row("Vida útil del proyecto (años)",
+                            fila_param("Vida útil del proyecto (años)",
                                 dcc.Slider(id="fin-lifetime", min=10, max=30, step=1,
                                            value=25,
                                            marks={10: "10a", 15: "15a", 20: "20a",
@@ -828,13 +828,13 @@ def _page_financiero():
 
                 dbc.Col(
                     html.Div([
-                        _chart_card(
+                        tarjeta_grafico(
                             "Flujo de caja acumulado (€)",
                             "fig-fin-cashflow",
                             height=300,
                             note="La línea cruza el eje en el año de retorno (payback)",
                         ),
-                        _chart_card(
+                        tarjeta_grafico(
                             "Desglose financiero del proyecto",
                             "fig-fin-waterfall",
                             height=260,
@@ -864,7 +864,7 @@ def _page_financiero():
     )
 
 
-def _page_export():
+def pagina_export():
     _SECTIONS = [
         ("comparativa", "bi bi-table",          "#014593",
          "Comparativa de modelos",
@@ -889,7 +889,7 @@ def _page_export():
          "Serie horaria del nivel de carga de la batería comunitaria"),
     ]
 
-    def _sec_row(value, icon, color, title, desc, last=False):
+    def fila_seccion(value, icon, color, title, desc, last=False):
         return html.Div([
             html.Div([
                 html.Div(
@@ -928,12 +928,12 @@ def _page_export():
         })
 
     section_rows = [
-        _sec_row(v, ic, col, title, desc, last=(i == len(_SECTIONS) - 1))
+        fila_seccion(v, ic, col, title, desc, last=(i == len(_SECTIONS) - 1))
         for i, (v, ic, col, title, desc) in enumerate(_SECTIONS)
     ]
 
     bat_section_rows = [
-        _sec_row(v, ic, col, title, desc, last=(i == len(_SECTIONS_BAT) - 1))
+        fila_seccion(v, ic, col, title, desc, last=(i == len(_SECTIONS_BAT) - 1))
         for i, (v, ic, col, title, desc) in enumerate(_SECTIONS_BAT)
     ]
 
@@ -1012,17 +1012,17 @@ def build_layout():
 
             html.Div(
                 [
-                    _sidebar(),
+                    barra_lateral(),
 
                     html.Div(
                         [
-                            _top_bar(),
-                            _page_config(),
-                            _page_comparativa(),
-                            _page_usuarios(),
-                            _page_energia(),
-                            _page_escenarios(),
-                            _page_export(),
+                            barra_superior(),
+                            pagina_config(),
+                            pagina_comparativa(),
+                            pagina_usuarios(),
+                            pagina_energia(),
+                            pagina_escenarios(),
+                            pagina_export(),
                         ],
                         className="page-content",
                     ),

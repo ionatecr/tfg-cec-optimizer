@@ -43,7 +43,7 @@ CO2_FACTOR_KG_KWH = 0.25  # kg CO2/kWh (media anual red española)
 
 
 
-def _fmt_num(x, dec: int = 0) -> str:
+def formato_num(x, dec: int = 0) -> str:
     """Formato español: punto para miles, coma para decimales."""
     try:
         s = f"{float(x):,.{dec}f}"
@@ -52,36 +52,36 @@ def _fmt_num(x, dec: int = 0) -> str:
         return "—"
 
 
-def _fmt_eur(x):
-    try:    return f"{_fmt_num(float(x), 2)} €"
+def formato_eur(x):
+    try:    return f"{formato_num(float(x), 2)} €"
     except (ValueError, TypeError): return ""
 
 
-def _fmt_pct(x):
-    try:    return f"{_fmt_num(float(x), 2)} %"
+def formato_pct(x):
+    try:    return f"{formato_num(float(x), 2)} %"
     except (ValueError, TypeError): return ""
 
 
-def _safe_float(x, default: float = 0.0) -> float:
+def a_float(x, default: float = 0.0) -> float:
     try:    return float(x)
     except (ValueError, TypeError): return default
 
 
-def _pick_time_col(df: pd.DataFrame) -> str | None:
+def col_tiempo(df: pd.DataFrame) -> str | None:
     for c in ["Time", "time", "timestamp", "datetime", "t"]:
         if c in df.columns:
             return c
     return None
 
 
-def _pick_first_existing(cols: list[str], candidates: list[str]) -> str | None:
+def primera_col(cols: list[str], candidates: list[str]) -> str | None:
     for c in candidates:
         if c in cols:
             return c
     return None
 
 
-def _empty_fig(msg: str) -> go.Figure:
+def grafico_vacio(msg: str) -> go.Figure:
     fig = go.Figure()
     fig.update_layout(
         margin=dict(l=10, r=10, t=10, b=10),
@@ -99,7 +99,7 @@ def _empty_fig(msg: str) -> go.Figure:
     return fig
 
 
-def _style_fig(
+def estilo_grafico(
     fig: go.Figure,
     y_title: str | None = None,
     y2_title: str | None = None,
@@ -162,7 +162,7 @@ def _style_fig(
 
 
 
-def _extract_summary_ts(results):
+def extraer_resultados(results):
     if isinstance(results, (tuple, list)) and len(results) == 2:
         a, b = results
         summary = a if isinstance(a, dict) else (b if isinstance(b, dict) else {})
@@ -175,31 +175,31 @@ def _extract_summary_ts(results):
     return {}, pd.DataFrame()
 
 
-def _get_ts(series: dict, model_key: str) -> pd.DataFrame:
+def get_serie(series: dict, model_key: str) -> pd.DataFrame:
     s = (series or {}).get(model_key) or {}
     rows = s.get("rows") or []
     return pd.DataFrame(rows) if rows else pd.DataFrame()
 
 
-def _pct_parts(summary: dict, which: str):
-    d_tot = _safe_float(summary.get("demand_total", 0.0))
-    g_tot = _safe_float(summary.get("gen_total",    0.0))
+def calcular_porcentajes(summary: dict, which: str):
+    d_tot = a_float(summary.get("demand_total", 0.0))
+    g_tot = a_float(summary.get("gen_total",    0.0))
 
     if which == "ex_ante":
-        self_kwh = _safe_float(summary.get("self_ex_ante", 0.0))
-        exp_kwh  = _safe_float(summary.get("exp_ex_ante",  0.0))
-        imp_kwh  = _safe_float(summary.get("imp_ex_ante",  0.0))
-        cost     = _safe_float(summary.get("cost_ex_ante", 0.0))
+        self_kwh = a_float(summary.get("self_ex_ante", 0.0))
+        exp_kwh  = a_float(summary.get("exp_ex_ante",  0.0))
+        imp_kwh  = a_float(summary.get("imp_ex_ante",  0.0))
+        cost     = a_float(summary.get("cost_ex_ante", 0.0))
     elif which == "fijo":
-        self_kwh = _safe_float(summary.get("self_fixed", 0.0))
-        exp_kwh  = _safe_float(summary.get("exp_fixed",  0.0))
-        imp_kwh  = _safe_float(summary.get("imp_fixed",  0.0))
-        cost     = _safe_float(summary.get("cost_fixed", 0.0))
+        self_kwh = a_float(summary.get("self_fixed", 0.0))
+        exp_kwh  = a_float(summary.get("exp_fixed",  0.0))
+        imp_kwh  = a_float(summary.get("imp_fixed",  0.0))
+        cost     = a_float(summary.get("cost_fixed", 0.0))
     else:
-        self_kwh = _safe_float(summary.get("self_prop", 0.0))
-        exp_kwh  = _safe_float(summary.get("exp_prop",  0.0))
-        imp_kwh  = _safe_float(summary.get("imp_prop",  0.0))
-        cost     = _safe_float(summary.get("cost_prop", 0.0))
+        self_kwh = a_float(summary.get("self_prop", 0.0))
+        exp_kwh  = a_float(summary.get("exp_prop",  0.0))
+        imp_kwh  = a_float(summary.get("imp_prop",  0.0))
+        cost     = a_float(summary.get("cost_prop", 0.0))
 
     self_pct = (self_kwh / d_tot * 100.0) if d_tot > 1e-12 else 0.0
     imp_pct  = (imp_kwh  / d_tot * 100.0) if d_tot > 1e-12 else 0.0
@@ -207,7 +207,7 @@ def _pct_parts(summary: dict, which: str):
     return cost, self_kwh, self_pct, exp_kwh, exp_pct, imp_kwh, imp_pct
 
 
-def _per_user_cost_for_label(summary: dict, which: str) -> dict[str, float]:
+def coste_por_usuario(summary: dict, which: str) -> dict[str, float]:
     if which == "ex_ante":
         key = "cost_per_user_ex_ante"
     elif which == "fijo":
@@ -222,7 +222,7 @@ def _per_user_cost_for_label(summary: dict, which: str) -> dict[str, float]:
 
 
 
-def _build_excel(payload: dict, run_tag: str, sections: list[str], fin_store: dict | None = None) -> bytes:
+def crear_excel(payload: dict, run_tag: str, sections: list[str], fin_store: dict | None = None) -> bytes:
     from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
 
@@ -497,7 +497,7 @@ def _build_excel(payload: dict, run_tag: str, sections: list[str], fin_store: di
     return buf.getvalue()
 
 
-def _build_zip(payload: dict, run_tag: str) -> bytes:
+def crear_zip(payload: dict, run_tag: str) -> bytes:
     df_models = pd.DataFrame(payload.get("models", []))
     meta      = payload.get("meta", {})
     series    = payload.get("series", {}) or {}
@@ -559,9 +559,9 @@ pre{{background:#fff;border:1px solid #DDE3ED;border-radius:8px;
 
 
 
-def _build_user_cost_fig(models: list[dict]) -> go.Figure:
+def grafico_coste_usuarios(models: list[dict]) -> go.Figure:
     if not models:
-        return _empty_fig("Sin datos de usuarios.")
+        return grafico_vacio("Sin datos de usuarios.")
 
     all_users: list[str] = []
     for m in models:
@@ -570,14 +570,14 @@ def _build_user_cost_fig(models: list[dict]) -> go.Figure:
                 all_users.append(u)
 
     if not all_users:
-        return _empty_fig("Sin datos de usuarios disponibles.")
+        return grafico_vacio("Sin datos de usuarios disponibles.")
 
     fig = go.Figure()
     colors = COLORWAY
 
     for i, m in enumerate(models):
         per_user = m.get("cost_per_user") or {}
-        y_vals   = [_safe_float(per_user.get(u, 0.0)) for u in all_users]
+        y_vals   = [a_float(per_user.get(u, 0.0)) for u in all_users]
         fig.add_trace(go.Bar(
             name=m["Modelo"],
             x=all_users,
@@ -585,7 +585,7 @@ def _build_user_cost_fig(models: list[dict]) -> go.Figure:
             marker_color=colors[i % len(colors)],
         ))
 
-    _style_fig(fig, y_title="Coste (€)", barmode="group")
+    estilo_grafico(fig, y_title="Coste (€)", barmode="group")
     return fig
 
 
@@ -846,7 +846,7 @@ def register_callbacks(app, cfg):
                 )
             except Exception as e:
                 return None, _err(f"Error en {label_for_err}: {e}")
-            s, t = _extract_summary_ts(results)
+            s, t = extraer_resultados(results)
             run_cache[key] = (s, t, run_tag, bs)
             return run_cache[key], None
 
@@ -859,8 +859,8 @@ def register_callbacks(app, cfg):
             last_run_tag = run_tag
             last_summary, last_ts = summary, ts
 
-            cost, self_kwh, self_pct, exp_kwh, exp_pct, imp_kwh, imp_pct = _pct_parts(summary, "ex_ante")
-            per_user_cost = _per_user_cost_for_label(summary, "ex_ante")
+            cost, self_kwh, self_pct, exp_kwh, exp_pct, imp_kwh, imp_pct = calcular_porcentajes(summary, "ex_ante")
+            per_user_cost = coste_por_usuario(summary, "ex_ante")
             users_display = list(per_user_cost.keys())
 
             models.append({
@@ -891,8 +891,8 @@ def register_callbacks(app, cfg):
             last_run_tag = run_tag
             last_summary, last_ts = summary, ts
 
-            cost, self_kwh, self_pct, exp_kwh, exp_pct, imp_kwh, imp_pct = _pct_parts(summary, "prop")
-            per_user_cost = _per_user_cost_for_label(summary, "prop")
+            cost, self_kwh, self_pct, exp_kwh, exp_pct, imp_kwh, imp_pct = calcular_porcentajes(summary, "prop")
+            per_user_cost = coste_por_usuario(summary, "prop")
             users_display = list(per_user_cost.keys())
             label         = dyn_label.get(dm, f"Dinámico {dm}")
 
@@ -938,7 +938,7 @@ def register_callbacks(app, cfg):
                     base_state=bat_base_state,
                 )
                 last_run_tag = run_tag_bat
-                summary_bat, ts_bat = _extract_summary_ts(results_bat)
+                summary_bat, ts_bat = extraer_resultados(results_bat)
 
                 if summary_bat.get("battery_enabled") and summary_bat.get("cost_bat") is not None:
                     cost_bat    = float(summary_bat["cost_bat"])
@@ -952,10 +952,10 @@ def register_callbacks(app, cfg):
                     self_pct_b = self_eff_b / d_tot * 100 if d_tot > 0 else 0
                     imp_pct_b  = imp_bat   / d_tot * 100 if d_tot > 0 else 0
                     exp_pct_b  = exp_bat   / g_tot * 100 if g_tot > 0 else 0
-                    pu_bat     = _per_user_cost_for_label(summary_bat, "bat")
+                    pu_bat     = coste_por_usuario(summary_bat, "bat")
                     # si no hay coste por usuario de batería, usa el dinámico
                     if not pu_bat:
-                        pu_bat = _per_user_cost_for_label(summary_bat, "prop")
+                        pu_bat = coste_por_usuario(summary_bat, "prop")
                     models.append({
                         "Modelo":                bat_label,
                         "Tipo":                  "bateria",
@@ -995,8 +995,8 @@ def register_callbacks(app, cfg):
         # reparto fijo proporcional (sin optimizador)
         if last_summary:
             label_fx = "Reparto proporcional"
-            cost_fx, self_fx, self_pct_fx, exp_fx, exp_pct_fx, imp_fx, imp_pct_fx = _pct_parts(last_summary, "fijo")
-            per_user_cost_fx = _per_user_cost_for_label(last_summary, "fijo")
+            cost_fx, self_fx, self_pct_fx, exp_fx, exp_pct_fx, imp_fx, imp_pct_fx = calcular_porcentajes(last_summary, "fijo")
+            per_user_cost_fx = coste_por_usuario(last_summary, "fijo")
             users_display_fx = list(per_user_cost_fx.keys())
             models.insert(0, {
                 "Modelo":             label_fx,
@@ -1082,43 +1082,43 @@ def register_callbacks(app, cfg):
             saving_pct_val = (ref_cost - best_cost_val) / ref_cost * 100.0
         saving_eur_val = (ref_cost - best_cost_val) if ref_cost and best_cost_val else None
 
-        kpi_best_cost  = _fmt_eur(best_cost_val)
-        kpi_saving_pct = _fmt_pct(saving_pct_val) if saving_pct_val is not None else "—"
+        kpi_best_cost  = formato_eur(best_cost_val)
+        kpi_saving_pct = formato_pct(saving_pct_val) if saving_pct_val is not None else "—"
 
-        best_imp_pct_val = _safe_float(best.get("% Importación", 0))
+        best_imp_pct_val = a_float(best.get("% Importación", 0))
         if ref_imp_pct is not None:
             imp_avoided_pp = ref_imp_pct - best_imp_pct_val
             if abs(imp_avoided_pp) < 0.05:
                 kpi_co2 = "—"
             else:
-                kpi_co2 = f"{_fmt_num(imp_avoided_pp, 2)}%"
+                kpi_co2 = f"{formato_num(imp_avoided_pp, 2)}%"
         else:
-            kpi_co2 = f"{_fmt_num(best_imp_pct_val, 2)}%"
+            kpi_co2 = f"{formato_num(best_imp_pct_val, 2)}%"
 
         # fuente más pequeña si el nombre del modelo es largo
         model_font = "18px" if len(best_model) > 14 else "22px" if len(best_model) > 10 else "26px"
         kpi_model_el = html.Span(best_model, style={"fontSize": model_font})
 
         series  = data.get("series", {}) or {}
-        ts_best = _get_ts(series, best_model)
-        ts_ref  = _get_ts(series, ref_label) if ref_label else pd.DataFrame()
+        ts_best = get_serie(series, best_model)
+        ts_ref  = get_serie(series, ref_label) if ref_label else pd.DataFrame()
 
         def _step_cost_ts(ts: pd.DataFrame, kind: str):
             if ts.empty: return None, None
-            tcol = _pick_time_col(ts)
+            tcol = col_tiempo(ts)
             if not tcol: return None, None
             x = ts.copy()
             x[tcol] = pd.to_datetime(x[tcol], errors="coerce")
             x = x.dropna(subset=[tcol]).sort_values(tcol)
             if kind == "ex_ante":
-                c_step = _pick_first_existing(x.columns, ["cost_ex_ante", "cost_step_ex_ante"])
-                c_cum  = _pick_first_existing(x.columns, ["cost_ex_ante_cum"])
+                c_step = primera_col(x.columns, ["cost_ex_ante", "cost_step_ex_ante"])
+                c_cum  = primera_col(x.columns, ["cost_ex_ante_cum"])
             elif kind == "fijo":
-                c_step = _pick_first_existing(x.columns, ["cost_fixed"])
-                c_cum  = _pick_first_existing(x.columns, ["cost_fixed_cum"])
+                c_step = primera_col(x.columns, ["cost_fixed"])
+                c_cum  = primera_col(x.columns, ["cost_fixed_cum"])
             else:
-                c_step = _pick_first_existing(x.columns, ["cost_prop", "cost_step_prop"])
-                c_cum  = _pick_first_existing(x.columns, ["cost_prop_cum"])
+                c_step = primera_col(x.columns, ["cost_prop", "cost_step_prop"])
+                c_cum  = primera_col(x.columns, ["cost_prop_cum"])
             out = x[[tcol]].copy()
             if c_step:
                 out["cost_step"] = pd.to_numeric(x[c_step], errors="coerce")
@@ -1168,9 +1168,9 @@ def register_callbacks(app, cfg):
                 for r in m_wk.itertuples()
             ]
 
-        self_pct = _safe_float(best_row.get("% Autoconsumo", 0))
+        self_pct = a_float(best_row.get("% Autoconsumo", 0))
         imp_pct  = max(0.0, 100.0 - self_pct)   # garantiza self + imp = 100 %
-        exp_pct  = _safe_float(best_row.get("% Excedente",    0))
+        exp_pct  = a_float(best_row.get("% Excedente",    0))
 
         eb_rows = []
         for eb_label, eb_pct, eb_color, eb_icon in [
@@ -1184,7 +1184,7 @@ def register_callbacks(app, cfg):
                            style={"color": eb_color, "fontSize": "13px", "marginRight": "6px"}),
                     html.Span(eb_label, style={"fontSize": "12px", "fontWeight": "600",
                                                "color": "var(--text)", "flexGrow": "1"}),
-                    html.Span(f"{_fmt_num(eb_pct, 1)}%", style={"fontSize": "12.5px", "fontWeight": "800",
+                    html.Span(f"{formato_num(eb_pct, 1)}%", style={"fontSize": "12.5px", "fontWeight": "800",
                                                         "color": eb_color}),
                 ], style={"display": "flex", "alignItems": "center", "marginBottom": "4px"}),
                 html.Div(
@@ -1221,7 +1221,7 @@ def register_callbacks(app, cfg):
                         "fontSize": "10px", "color": "var(--text-muted)",
                         "fontWeight": "600", "flex": "1",
                     }),
-                    html.Span(f"{_fmt_num(pct, 1)}%", style={
+                    html.Span(f"{formato_num(pct, 1)}%", style={
                         "fontSize": "10px", "fontWeight": "700", "color": color,
                     }),
                 ], style={"display": "flex", "alignItems": "center", "marginBottom": "2px"}),
@@ -1244,8 +1244,8 @@ def register_callbacks(app, cfg):
             tipo        = row.get("Tipo", "ex_ante")
             bar_pct     = (cost_v / max_cost_r * 100) if max_cost_r > 0 else 0.0
             bar_col     = _RANK_BAR_COLORS[min(idx, len(_RANK_BAR_COLORS) - 1)]
-            self_pct_r  = _safe_float(row.get("% Autoconsumo", 0))
-            imp_pct_r   = _safe_float(row.get("% Importación", 0))
+            self_pct_r  = a_float(row.get("% Autoconsumo", 0))
+            imp_pct_r   = a_float(row.get("% Importación", 0))
 
             if ref_cost and cost_v and mn != ref_label:
                 sav     = ref_cost - cost_v
@@ -1265,7 +1265,7 @@ def register_callbacks(app, cfg):
                     html.Span(mn, style={"marginLeft": "8px", "fontWeight": "700",
                                           "fontSize": "13px", "flexGrow": "1",
                                           "color": "var(--text)"}),
-                    html.Span(f"{_fmt_num(cost_v, 0)} €",
+                    html.Span(f"{formato_num(cost_v, 0)} €",
                               style={"fontWeight": "900", "fontSize": "14px",
                                      "marginLeft": "auto", "color": "var(--text)"}),
                     html.Span(sav_txt,
@@ -1307,8 +1307,8 @@ def register_callbacks(app, cfg):
             ucols = []
             for ui, u in enumerate(all_users):
                 user_color = _USER_PALETTE[ui % len(_USER_PALETTE)]
-                ref_u     = _safe_float((ref_mrow.get("cost_per_user") or {}).get(u, 0)) if ref_mrow else 0
-                best_u    = _safe_float((best_mrow.get("cost_per_user") or {}).get(u, 0))
+                ref_u     = a_float((ref_mrow.get("cost_per_user") or {}).get(u, 0)) if ref_mrow else 0
+                best_u    = a_float((best_mrow.get("cost_per_user") or {}).get(u, 0))
                 sav_u     = ref_u - best_u if ref_mrow else 0
                 sav_pct_u = (sav_u / ref_u * 100) if ref_u > 1e-9 else 0
                 sav_col_u = "#27AE60" if sav_u >= 0 else "#E74C3C"
@@ -1321,7 +1321,7 @@ def register_callbacks(app, cfg):
                             html.Span(ref_label,
                                       style={"fontSize": "11px", "color": "var(--text-muted)",
                                              "fontWeight": "600", "flex": "1"}),
-                            html.Span(f"{_fmt_num(ref_u, 0)} €",
+                            html.Span(f"{formato_num(ref_u, 0)} €",
                                       style={"fontSize": "11px", "fontWeight": "700",
                                              "color": "var(--text)"}),
                         ], style={"display": "flex", "justifyContent": "space-between",
@@ -1332,7 +1332,7 @@ def register_callbacks(app, cfg):
                         html.Span(best_model,
                                   style={"fontSize": "11px", "color": "#0e7a62",
                                          "fontWeight": "600", "flex": "1"}),
-                        html.Span(f"{_fmt_num(best_u, 0)} €",
+                        html.Span(f"{formato_num(best_u, 0)} €",
                                   style={"fontSize": "11px", "fontWeight": "700",
                                          "color": "#0e7a62"}),
                     ], style={"display": "flex", "justifyContent": "space-between"}),
@@ -1352,10 +1352,10 @@ def register_callbacks(app, cfg):
                     ], style={"display": "flex", "alignItems": "center",
                               "marginBottom": "12px"}),
                     html.Div([
-                        html.Span(f"{_fmt_num(sav_pct_u, 1)}%",
+                        html.Span(f"{formato_num(sav_pct_u, 1)}%",
                                   style={"fontSize": "26px", "fontWeight": "900",
                                          "color": sav_col_u, "lineHeight": "1"}),
-                        html.Span(f" ({'+'if sav_u >= 0 else ''}{_fmt_num(sav_u, 0)} €)",
+                        html.Span(f" ({'+'if sav_u >= 0 else ''}{formato_num(sav_u, 0)} €)",
                                   style={"fontSize": "12px", "color": sav_col_u,
                                          "fontWeight": "600"}),
                         html.Div("ahorro vs referencia",
@@ -1385,8 +1385,8 @@ def register_callbacks(app, cfg):
         if all_users and ref_mrow and best_mrow:
             rates = []
             for u in all_users:
-                ref_u  = _safe_float((ref_mrow.get("cost_per_user") or {}).get(u, 0))
-                best_u = _safe_float((best_mrow.get("cost_per_user") or {}).get(u, 0))
+                ref_u  = a_float((ref_mrow.get("cost_per_user") or {}).get(u, 0))
+                best_u = a_float((best_mrow.get("cost_per_user") or {}).get(u, 0))
                 rates.append((ref_u - best_u) / ref_u if abs(ref_u) > 1e-9 else 0.0)
 
             n = len(rates)
@@ -1421,7 +1421,7 @@ def register_callbacks(app, cfg):
                                 "letterSpacing": "0.5px", "marginBottom": "2px",
                             }),
                             html.Div([
-                                html.Span(f"{_fmt_num(equidad_pct, 0)}%", style={
+                                html.Span(f"{formato_num(equidad_pct, 0)}%", style={
                                     "fontSize": "26px", "fontWeight": "900",
                                     "color": eq_color, "lineHeight": "1", "marginRight": "8px",
                                 }),
@@ -1460,16 +1460,16 @@ def register_callbacks(app, cfg):
     )
     def update_alpha_chart(model_label, data):
         if not model_label or not data or "series" not in data:
-            return _empty_fig("Selecciona un modelo para ver los coeficientes α.")
+            return grafico_vacio("Selecciona un modelo para ver los coeficientes α.")
 
         series = data.get("series", {}) or {}
-        ts = _get_ts(series, model_label)
+        ts = get_serie(series, model_label)
         if ts.empty:
-            return _empty_fig("No hay series disponibles para este modelo.")
+            return grafico_vacio("No hay series disponibles para este modelo.")
 
-        tcol = _pick_time_col(ts)
+        tcol = col_tiempo(ts)
         if not tcol:
-            return _empty_fig("No se encontró columna temporal.")
+            return grafico_vacio("No se encontró columna temporal.")
 
         ts[tcol] = pd.to_datetime(ts[tcol], errors="coerce")
         ts = ts.dropna(subset=[tcol]).sort_values(tcol).reset_index(drop=True)
@@ -1482,7 +1482,7 @@ def register_callbacks(app, cfg):
 
         alpha_cols = [c for c in ts.columns if c.startswith(prefix)]
         if not alpha_cols:
-            return _empty_fig("No se encontraron columnas de coeficientes α en este modelo.")
+            return grafico_vacio("No se encontraron columnas de coeficientes α en este modelo.")
 
         models_list = data.get("models", [])
         users_display = []
@@ -1576,7 +1576,7 @@ def register_callbacks(app, cfg):
             exante_means = {}
             for k in data.get("series", {}):
                 if "ex" in k.lower() and "ante" in k.lower():
-                    ts_ea = _get_ts(data["series"], k)
+                    ts_ea = get_serie(data["series"], k)
                     ea_cols = [c for c in ts_ea.columns if c.startswith("alpha_u")]
                     fv_mask_ea = (
                         pd.to_numeric(ts_ea.get("pv_kWh", pd.Series(dtype=float)), errors="coerce")
@@ -1611,8 +1611,8 @@ def register_callbacks(app, cfg):
                                 line=dict(width=2, color="white")),
                     hovertemplate=(
                         f"<b>{lbl}</b><br>"
-                        f"Media: {_fmt_num(stat['mean'], 3)}<br>"
-                        f"Dispersión: [{_fmt_num(stat['lo'], 3)} – {_fmt_num(stat['hi'], 3)}]"
+                        f"Media: {formato_num(stat['mean'], 3)}<br>"
+                        f"Dispersión: [{formato_num(stat['lo'], 3)} – {formato_num(stat['hi'], 3)}]"
                         "<extra></extra>"
                     ),
                 ))
@@ -1622,7 +1622,7 @@ def register_callbacks(app, cfg):
                     legendgroup="median", showlegend=first,
                     marker=dict(symbol="diamond", size=11, color="white",
                                 line=dict(width=2.5, color=stat["color"])),
-                    hovertemplate=f"<b>{lbl}</b><br>Mediana: {_fmt_num(stat['median'], 3)}<extra></extra>",
+                    hovertemplate=f"<b>{lbl}</b><br>Mediana: {formato_num(stat['median'], 3)}<extra></extra>",
                 ))
                 if lbl in exante_means:
                     ea_val = exante_means[lbl]
@@ -1632,7 +1632,7 @@ def register_callbacks(app, cfg):
                         legendgroup="mean_ea", showlegend=first,
                         marker=dict(symbol="diamond", size=11, color="white",
                                     line=dict(width=2.5, color="#6B7280")),
-                        hovertemplate=f"<b>{lbl}</b><br>Media ex ante: {_fmt_num(ea_val, 3)}<extra></extra>",
+                        hovertemplate=f"<b>{lbl}</b><br>Media ex ante: {formato_num(ea_val, 3)}<extra></extra>",
                     ))
 
             fig.update_layout(
@@ -1680,7 +1680,7 @@ def register_callbacks(app, cfg):
             prefix = ("alpha_ex_" if tipo == "ex_ante"
                       else "alpha_fx_" if tipo == "fijo"
                       else "alpha_prop_")
-            ts     = _get_ts(series, label)
+            ts     = get_serie(series, label)
             if ts.empty:
                 continue
             alpha_cols = sorted([c for c in ts.columns if c.startswith(prefix)])
@@ -1766,7 +1766,7 @@ def register_callbacks(app, cfg):
         Input("results-store", "data"),
     )
     def render_explorer(data):
-        _no     = _empty_fig("Ejecuta el modelo para explorar los datos.")
+        _no     = grafico_vacio("Ejecuta el modelo para explorar los datos.")
         _no_cards = html.Div("Sin datos.", className="text-muted small text-center py-3")
         if not data or "series" not in data or not data["series"]:
             return [], _no, _no_cards, "Ejecuta el modelo en Configurar para ver los datos."
@@ -1774,11 +1774,11 @@ def register_callbacks(app, cfg):
         series  = data["series"]
         models  = data.get("models", [])
         first_key = next(iter(series))
-        ts_raw  = _get_ts(series, first_key)
+        ts_raw  = get_serie(series, first_key)
         if ts_raw.empty:
             return [], _no, _no_cards, "No se encontraron series de datos."
 
-        tcol = _pick_time_col(ts_raw)
+        tcol = col_tiempo(ts_raw)
         if not tcol:
             return [], _no, _no_cards, "No se encontró columna temporal."
 
@@ -1798,8 +1798,8 @@ def register_callbacks(app, cfg):
                            f"{_MESES[t_dt_max.month-1]} {t_dt_max.year}")
         else:
             t_start = "—"
-        dem_col  = _pick_first_existing(ts.columns, ["demand_kWh", "D_total"])
-        pv_col_e = _pick_first_existing(ts.columns, ["pv_kWh", "G"])
+        dem_col  = primera_col(ts.columns, ["demand_kWh", "D_total"])
+        pv_col_e = primera_col(ts.columns, ["pv_kWh", "G"])
 
         total_dem = float(ts[dem_col].sum()) if dem_col else 0.0
         total_pv  = float(ts[pv_col_e].sum()) if pv_col_e else 0.0
@@ -1834,14 +1834,14 @@ def register_callbacks(app, cfg):
 
         stats_row = [
             stat_tile("bi-calendar-range",   "Periodo",        t_start,                                    _TILE_COLORS[0]),
-            stat_tile("bi-sun",              "Generación FV",  f"{_fmt_num(total_pv, 0)} kWh" if total_pv > 0 else "—", _TILE_COLORS[1]),
+            stat_tile("bi-sun",              "Generación FV",  f"{formato_num(total_pv, 0)} kWh" if total_pv > 0 else "—", _TILE_COLORS[1]),
             stat_tile("bi-people",           "Usuarios",       str(n_users),                               _TILE_COLORS[2]),
-            stat_tile("bi-lightning-charge", "Demanda total",  f"{_fmt_num(total_dem, 0)} kWh",             _TILE_COLORS[3]),
+            stat_tile("bi-lightning-charge", "Demanda total",  f"{formato_num(total_dem, 0)} kWh",             _TILE_COLORS[3]),
         ]
 
         fig_price = go.Figure()
-        buy_col_e  = _pick_first_existing(ts.columns, ["p_buy"])
-        sell_col_e = _pick_first_existing(ts.columns, ["p_sell"])
+        buy_col_e  = primera_col(ts.columns, ["p_buy"])
+        sell_col_e = primera_col(ts.columns, ["p_sell"])
         p_buy_24 = p_sell_24 = None
         if buy_col_e:
             p_buy_24 = (ts.groupby("hour")[buy_col_e].mean()
@@ -1869,7 +1869,7 @@ def register_callbacks(app, cfg):
                 x=p_sell_24["hour"], y=p_sell_24[sell_col_e],
                 mode="lines", name="Precio venta",
                 line=dict(color=COLOR_DYNAMIC, width=2, dash="dash")))
-        _style_fig(fig_price, y_title="€/kWh")
+        estilo_grafico(fig_price, y_title="€/kWh")
         fig_price.update_xaxes(dtick=2, tick0=0, title="Hora del día")
         fig_price.update_layout(
             margin=dict(b=12, t=8),
@@ -1879,9 +1879,9 @@ def register_callbacks(app, cfg):
 
         fig_monthly_balance = go.Figure()
 
-        self_col = _pick_first_existing(ts.columns, ["self_prop", "self_ex_ante"])
-        imp_col  = _pick_first_existing(ts.columns, ["imp_prop",  "imp_ex_ante"])
-        exp_col  = _pick_first_existing(ts.columns, ["exp_prop",  "exp_ex_ante"])
+        self_col = primera_col(ts.columns, ["self_prop", "self_ex_ante"])
+        imp_col  = primera_col(ts.columns, ["imp_prop",  "imp_ex_ante"])
+        exp_col  = primera_col(ts.columns, ["exp_prop",  "exp_ex_ante"])
 
         if not (self_col and imp_col and exp_col) and user_cols and dem_col and pv_col_e:
             ts["_self_total"] = ts[user_cols].sum(axis=1)
@@ -1914,7 +1914,7 @@ def register_callbacks(app, cfg):
                 if r_bot: br += ["borderBottomLeftRadius:4px", "borderBottomRightRadius:4px"]
                 br_str = "; ".join(br)
                 return html.Div(
-                    html.Span(f"{_fmt_num(val, 0)}", style={
+                    html.Span(f"{formato_num(val, 0)}", style={
                         "color": "white", "fontSize": "10px", "fontWeight": "800",
                     }) if h >= 10 else None,
                     style={
@@ -1924,7 +1924,7 @@ def register_callbacks(app, cfg):
                         **({"borderTopLeftRadius": "4px", "borderTopRightRadius": "4px"} if r_top else {}),
                         **({"borderBottomLeftRadius": "4px", "borderBottomRightRadius": "4px"} if r_bot else {}),
                     },
-                    title=f"{_fmt_num(val, 0)} kWh",
+                    title=f"{formato_num(val, 0)} kWh",
                 )
 
             month_cards = []
@@ -1953,7 +1953,7 @@ def register_callbacks(app, cfg):
                         "width": "100%", "display": "flex", "flexDirection": "column",
                         "height": f"{BAR_MAX_H}px", "justifyContent": "flex-end", "gap": "2px",
                     }),
-                    html.Div(f"{_fmt_num(cv, 0)}%" if has_data else "—", className="mc-pct"),
+                    html.Div(f"{formato_num(cv, 0)}%" if has_data else "—", className="mc-pct"),
                 ], className="mc-mini-col"))
 
             monthly_balance_out = month_cards
@@ -2092,7 +2092,7 @@ def register_callbacks(app, cfg):
         Input("results-store", "data"),
     )
     def render_seasonal(data):
-        _no_fig = _empty_fig("Ejecuta el modelo para ver el análisis estacional.")
+        _no_fig = grafico_vacio("Ejecuta el modelo para ver el análisis estacional.")
         if not data or "series" not in data or not data["series"]:
             return html.Div(), _no_fig
 
@@ -2117,10 +2117,10 @@ def register_callbacks(app, cfg):
             None,
         )
 
-        ts_best = _get_ts(series, best_label)
+        ts_best = get_serie(series, best_label)
         if ts_best.empty:
-            ts_best = _get_ts(series, next(iter(series)))
-        tcol = _pick_time_col(ts_best)
+            ts_best = get_serie(series, next(iter(series)))
+        tcol = col_tiempo(ts_best)
         if not tcol:
             return html.Div(), _no_fig
 
@@ -2144,13 +2144,13 @@ def register_callbacks(app, cfg):
         best_kind = ("ex_ante" if "ex ante" in best_label.lower() else
                      "fijo"    if any(m.get("Tipo") == "fijo" and m.get("Modelo") == best_label
                                       for m in models) else "prop")
-        self_col = _pick_first_existing(ts.columns,
+        self_col = primera_col(ts.columns,
             ["self_prop", "self_ex_ante", "self_fixed", "self_bat"])
-        imp_col  = _pick_first_existing(ts.columns,
+        imp_col  = primera_col(ts.columns,
             ["imp_prop",  "imp_ex_ante",  "imp_fixed",  "imp_bat"])
-        exp_col  = _pick_first_existing(ts.columns,
+        exp_col  = primera_col(ts.columns,
             ["exp_prop",  "exp_ex_ante",  "exp_fixed",  "exp_bat"])
-        dem_col  = _pick_first_existing(ts.columns, ["demand_kWh", "D_total"])
+        dem_col  = primera_col(ts.columns, ["demand_kWh", "D_total"])
 
         if not (self_col and dem_col):
             return html.Div(), _no_fig
@@ -2170,16 +2170,16 @@ def register_callbacks(app, cfg):
 
         ref_stats = {}
         if ref_label and ref_label != best_label:
-            ts_ref = _get_ts(series, ref_label)
+            ts_ref = get_serie(series, ref_label)
             if not ts_ref.empty:
-                tc_r = _pick_time_col(ts_ref)
+                tc_r = col_tiempo(ts_ref)
                 if tc_r:
                     ts_r = ts_ref.copy()
                     ts_r[tc_r] = pd.to_datetime(ts_r[tc_r], errors="coerce")
                     ts_r = ts_r.dropna(subset=[tc_r]).sort_values(tc_r).reset_index(drop=True)
                     ts_r["_season"] = ts_r[tc_r].dt.month.map(_season)
-                    sc_r = _pick_first_existing(ts_r.columns, ["self_ex_ante", "self_prop"])
-                    dm_r = _pick_first_existing(ts_r.columns, ["demand_kWh", "D_total"])
+                    sc_r = primera_col(ts_r.columns, ["self_ex_ante", "self_prop"])
+                    dm_r = primera_col(ts_r.columns, ["demand_kWh", "D_total"])
                     for s in _SEASON_ORDER:
                         mask = ts_r["_season"] == s
                         dem  = float(ts_r.loc[mask, dm_r].sum()) if dm_r else 0
@@ -2193,7 +2193,7 @@ def register_callbacks(app, cfg):
             icon = _SEASON_ICON[s]
             ref_pct = (ref_stats[s]["self_pct"] if s in ref_stats else None)
             _d = st['self_pct'] - ref_pct if ref_pct else 0
-            delta = (f"{'+'if _d >= 0 else ''}{_fmt_num(_d, 1)}%") if ref_pct else ""
+            delta = (f"{'+'if _d >= 0 else ''}{formato_num(_d, 1)}%") if ref_pct else ""
             delta_col = "#27AE60" if (ref_pct and st['self_pct'] > ref_pct) else "#E74C3C"
 
             season_cards.append(dbc.Col(
@@ -2205,7 +2205,7 @@ def register_callbacks(app, cfg):
                     ], style={"display": "flex", "alignItems": "center",
                               "marginBottom": "10px"}),
                     html.Div([
-                        html.Span(f"{_fmt_num(st['self_pct'], 1)}%",
+                        html.Span(f"{formato_num(st['self_pct'], 1)}%",
                                   style={"fontSize": "28px", "fontWeight": "900",
                                          "color": col, "lineHeight": "1"}),
                         html.Span(" autoconsumo",
@@ -2252,7 +2252,7 @@ def register_callbacks(app, cfg):
             marker_color=COLOR_DEMAND, opacity=0.6,
             yaxis="y2",
         ))
-        _style_fig(fig_season, y_title="Autoconsumo (%)", y2_title="Importación (%)", barmode="group")
+        estilo_grafico(fig_season, y_title="Autoconsumo (%)", y2_title="Importación (%)", barmode="group")
         fig_season.update_layout(margin=dict(l=8, r=8, t=10, b=10))
 
         return dbc.Row(season_cards, className="g-3"), fig_season
@@ -2264,7 +2264,7 @@ def register_callbacks(app, cfg):
     )
     def render_battery_soc(data):
         if not data or "series" not in data:
-            return False, _empty_fig("Sin datos de batería.")
+            return False, grafico_vacio("Sin datos de batería.")
 
         bat_model = next(
             (m for m in (data.get("models") or [])
@@ -2272,18 +2272,18 @@ def register_callbacks(app, cfg):
             None,
         )
         if not bat_model:
-            return False, _empty_fig("Sin datos de batería.")
+            return False, grafico_vacio("Sin datos de batería.")
 
         bat_label   = bat_model["Modelo"]
         bat_cap_kwh = float(bat_model.get("battery_capacity_kwh") or 50.0)
 
-        ts = _get_ts(data["series"], bat_label)
+        ts = get_serie(data["series"], bat_label)
         if ts.empty or "soc_bat" not in ts.columns:
-            return False, _empty_fig("Sin columna SOC en series de batería.")
+            return False, grafico_vacio("Sin columna SOC en series de batería.")
 
-        tcol = _pick_time_col(ts)
+        tcol = col_tiempo(ts)
         if not tcol:
-            return False, _empty_fig("Sin columna temporal.")
+            return False, grafico_vacio("Sin columna temporal.")
 
         ts[tcol] = pd.to_datetime(ts[tcol], errors="coerce")
         ts = ts.dropna(subset=[tcol]).sort_values(tcol).reset_index(drop=True)
@@ -2319,13 +2319,13 @@ def register_callbacks(app, cfg):
             line_dash="dash",
             line_color="#E67E22",
             line_width=3,
-            annotation_text=f" Media: {_fmt_num(soc_mean_pct, 1)}% ",
+            annotation_text=f" Media: {formato_num(soc_mean_pct, 1)}% ",
             annotation_position="right",
             annotation_font=dict(size=12, color="#fff", family="Inter, sans-serif"),
             annotation_bgcolor="#E67E22",
             annotation_borderpad=5,
         )
-        _style_fig(fig, y_title="SOC (%)")
+        estilo_grafico(fig, y_title="SOC (%)")
         fig.update_yaxes(range=[0, 105])
         fig.update_layout(margin=dict(l=8, r=90, t=8, b=8))
         return True, fig
@@ -2349,7 +2349,7 @@ def register_callbacks(app, cfg):
         State("results-store",       "data"),
     )
     def render_financiero(bat_store, cost_kwp, om_pct, inflation, discount, lifetime, data):
-        _no = _empty_fig("Sin datos de análisis.")
+        _no = grafico_vacio("Sin datos de análisis.")
         empty_style = {"display": "flex"}
         hidden_style = {"display": "none"}
 
@@ -2450,10 +2450,10 @@ def register_callbacks(app, cfg):
                     payback_yr = (yr - 1) + (-prev) / (c - prev) if c != prev else float(yr)
                     break
 
-        kpi_pb  = f"{_fmt_num(payback_yr, 1)} años" if payback_yr is not None else "> 100 años"
-        kpi_npv = f"{_fmt_num(npv, 0)} €"
-        kpi_irr = f"{_fmt_num(irr * 100, 1)} %" if irr else "—"
-        kpi_sav = f"{_fmt_num(annual_savings, 0)} €/año"
+        kpi_pb  = f"{formato_num(payback_yr, 1)} años" if payback_yr is not None else "> 100 años"
+        kpi_npv = f"{formato_num(npv, 0)} €"
+        kpi_irr = f"{formato_num(irr * 100, 1)} %" if irr else "—"
+        kpi_sav = f"{formato_num(annual_savings, 0)} €/año"
 
         fig_cf = go.Figure()
 
@@ -2479,14 +2479,14 @@ def register_callbacks(app, cfg):
                 line_dash="dash",
                 line_color="#F59E0B",
                 line_width=2,
-                annotation_text=f"Payback: año {_fmt_num(payback_yr, 1)}",
+                annotation_text=f"Payback: año {formato_num(payback_yr, 1)}",
                 annotation_position="top right",
                 annotation_font=dict(size=11, color="#92400e", family="Inter, sans-serif"),
                 annotation_bgcolor="rgba(251,191,36,0.15)",
                 annotation_bordercolor="rgba(251,191,36,0.4)",
                 annotation_borderpad=4,
             )
-        _style_fig(fig_cf, y_title="€ acumulados")
+        estilo_grafico(fig_cf, y_title="€ acumulados")
         fig_cf.update_xaxes(title_text="Año", dtick=5)
         fig_cf.update_yaxes(tickformat="+,.0f")
         fig_cf.update_layout(
@@ -2498,10 +2498,10 @@ def register_callbacks(app, cfg):
 
         color_npv = "#18BC9C" if npv >= 0 else "#E74C3C"
         wf_labels = [
-            f"−{_fmt_num(investment, 0)} €",
-            f"+{_fmt_num(pv_savings, 0)} €",
-            f"−{_fmt_num(pv_om, 0)} €",
-            f"{'+'if npv>=0 else '−'}{_fmt_num(abs(npv), 0)} €",
+            f"−{formato_num(investment, 0)} €",
+            f"+{formato_num(pv_savings, 0)} €",
+            f"−{formato_num(pv_om, 0)} €",
+            f"{'+'if npv>=0 else '−'}{formato_num(abs(npv), 0)} €",
         ]
         wf_bases   = [0, -investment, -investment + pv_savings, 0]
         wf_heights = [-investment, pv_savings, -pv_om, npv]
@@ -2579,7 +2579,7 @@ def register_callbacks(app, cfg):
         Input("results-store", "data"),
     )
     def render_bat_optimal(data):
-        _no = _empty_fig("Ejecuta el modelo para ver la capacidad óptima.")
+        _no = grafico_vacio("Ejecuta el modelo para ver la capacidad óptima.")
         _empty_kpi = html.Div("—", style={"fontSize": "28px", "fontWeight": "900",
                                            "color": "var(--text-muted)"})
         if not data or "series" not in data or not data["series"]:
@@ -2587,14 +2587,14 @@ def register_callbacks(app, cfg):
 
         series = data.get("series", {})
         first_key = next(iter(series))
-        ts_base = _get_ts(series, first_key)
+        ts_base = get_serie(series, first_key)
         if ts_base.empty:
             return _no, _empty_kpi, {}
 
-        pv_col  = _pick_first_existing(ts_base.columns, ["pv_kWh", "G"])
-        dem_col = _pick_first_existing(ts_base.columns, ["demand_kWh", "D_total"])
-        buy_col = _pick_first_existing(ts_base.columns, ["p_buy"])
-        sel_col = _pick_first_existing(ts_base.columns, ["p_sell"])
+        pv_col  = primera_col(ts_base.columns, ["pv_kWh", "G"])
+        dem_col = primera_col(ts_base.columns, ["demand_kWh", "D_total"])
+        buy_col = primera_col(ts_base.columns, ["p_buy"])
+        sel_col = primera_col(ts_base.columns, ["p_sell"])
         if not (pv_col and dem_col):
             return _no, _empty_kpi, {}
 
@@ -2676,7 +2676,7 @@ def register_callbacks(app, cfg):
                         line=dict(color="#fff", width=2.5)),
             hovertemplate=(
                 f"<b>Capacidad óptima: {optimal_cap:.0f} kWh</b><br>"
-                f"Ahorro: <b>{_fmt_num(optimal_sav, 0)} €/año</b><extra></extra>"
+                f"Ahorro: <b>{formato_num(optimal_sav, 0)} €/año</b><extra></extra>"
             ),
         ))
         fig.add_vline(
@@ -2686,7 +2686,7 @@ def register_callbacks(app, cfg):
             annotation_position="top right",
             annotation_font=dict(size=11, color="#7a5800"),
         )
-        _style_fig(fig, y_title="Ahorro adicional (€/año)")
+        estilo_grafico(fig, y_title="Ahorro adicional (€/año)")
         fig.update_xaxes(title="Capacidad batería (kWh)")
         fig.update_layout(
             margin=dict(l=10, r=10, t=16, b=36),
@@ -2713,7 +2713,7 @@ def register_callbacks(app, cfg):
             }),
 
             html.Div([
-                html.Span(f"{_fmt_num(optimal_sav, 0)} €/año", style={
+                html.Span(f"{formato_num(optimal_sav, 0)} €/año", style={
                     "fontWeight": "800", "fontSize": "14px", "color": "var(--text)",
                 }),
                 html.Span(" ahorro estimado", style={
@@ -2752,7 +2752,7 @@ def register_callbacks(app, cfg):
         State("scenario-pv-range",     "value"),
     )
     def render_scenarios(n, data, pv_range):
-        _no = _empty_fig("Ejecuta el análisis de escenarios.")
+        _no = grafico_vacio("Ejecuta el análisis de escenarios.")
         empty_style  = {"display": "flex"}
         hidden_style = {"display": "none"}
 
@@ -2763,17 +2763,17 @@ def register_callbacks(app, cfg):
         models = data.get("models", [])
 
         first_key = next(iter(series))
-        ts_base   = _get_ts(series, first_key)
+        ts_base   = get_serie(series, first_key)
         if ts_base.empty:
             return _no, _no, _no, "No se encontraron series temporales.", empty_style
 
-        pv_col  = _pick_first_existing(ts_base.columns, ["pv_kWh", "G"])
-        dem_col = _pick_first_existing(ts_base.columns, ["demand_kWh", "D_total"])
-        buy_col = _pick_first_existing(ts_base.columns, ["p_buy"])
-        sel_col = _pick_first_existing(ts_base.columns, ["p_sell"])
-        self_col= _pick_first_existing(ts_base.columns, ["self_prop", "self_ex_ante"])
-        imp_col = _pick_first_existing(ts_base.columns, ["imp_prop",  "imp_ex_ante"])
-        exp_col = _pick_first_existing(ts_base.columns, ["exp_prop",  "exp_ex_ante"])
+        pv_col  = primera_col(ts_base.columns, ["pv_kWh", "G"])
+        dem_col = primera_col(ts_base.columns, ["demand_kWh", "D_total"])
+        buy_col = primera_col(ts_base.columns, ["p_buy"])
+        sel_col = primera_col(ts_base.columns, ["p_sell"])
+        self_col= primera_col(ts_base.columns, ["self_prop", "self_ex_ante"])
+        imp_col = primera_col(ts_base.columns, ["imp_prop",  "imp_ex_ante"])
+        exp_col = primera_col(ts_base.columns, ["exp_prop",  "exp_ex_ante"])
 
         if not (pv_col and dem_col):
             return _no, _no, _no, "Sin columnas FV o demanda.", empty_style
@@ -2881,7 +2881,7 @@ def register_callbacks(app, cfg):
             annotation_position="top right",
             annotation_font=dict(size=10, color="#F39C12"),
         )
-        _style_fig(fig_sav, y_title="Ahorro (€/año)")
+        estilo_grafico(fig_sav, y_title="Ahorro (€/año)")
         fig_sav.update_xaxes(title="Potencia FV instalada (kWp)")
         fig_sav.update_layout(**_COMMON_LAYOUT)
 
@@ -2918,7 +2918,7 @@ def register_callbacks(app, cfg):
             annotation_position="top right",
             annotation_font=dict(size=10, color="#F39C12"),
         )
-        _style_fig(fig_self, y_title="Tasa de autoconsumo (%)")
+        estilo_grafico(fig_self, y_title="Tasa de autoconsumo (%)")
         fig_self.update_xaxes(title="Potencia FV instalada (kWp)")
         fig_self.update_yaxes(range=[0, 105])
         fig_self.update_layout(**_COMMON_LAYOUT)
@@ -2956,7 +2956,7 @@ def register_callbacks(app, cfg):
             annotation_position="top right",
             annotation_font=dict(size=10, color="#F39C12"),
         )
-        _style_fig(fig_exp, y_title="Excedente FV (kWh/año)")
+        estilo_grafico(fig_exp, y_title="Excedente FV (kWh/año)")
         fig_exp.update_xaxes(title="Potencia FV instalada (kWp)")
         fig_exp.update_layout(**_COMMON_LAYOUT)
 
@@ -2991,7 +2991,7 @@ def register_callbacks(app, cfg):
         if not sections:
             return no_update
         tag    = run_tag or "run"
-        xbytes = _build_excel(data, tag, sections, fin_store=fin_store)
+        xbytes = crear_excel(data, tag, sections, fin_store=fin_store)
         return dict(
             content=base64.b64encode(xbytes).decode(),
             filename=f"{tag}_resultados.xlsx",

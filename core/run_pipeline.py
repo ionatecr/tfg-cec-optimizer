@@ -11,7 +11,7 @@ from optimizacion import optimizar
 _PROJECT_ROOT = pathlib.Path(__file__).parent.parent
 
 
-def _setup_run_logger(cfg, run_id: str) -> logging.Logger:
+def crear_logger(cfg, run_id: str) -> logging.Logger:
     log_dir = pathlib.Path(cfg.logging.directory)
     if not log_dir.is_absolute():
         log_dir = _PROJECT_ROOT / log_dir
@@ -29,7 +29,7 @@ def _setup_run_logger(cfg, run_id: str) -> logging.Logger:
     return logger
 
 
-def _find_default_csv(resources_dir: str, patterns: list[str]) -> str:
+def buscar_csv(resources_dir: str, patterns: list[str]) -> str:
     for pat in patterns:
         hits = glob.glob(os.path.join(resources_dir, pat))
         if hits:
@@ -37,7 +37,7 @@ def _find_default_csv(resources_dir: str, patterns: list[str]) -> str:
     raise FileNotFoundError(f"No CSV encontrado en {resources_dir}")
 
 
-def _smart_read_csv(path: str, cfg) -> pd.DataFrame:
+def leer_csv(path: str, cfg) -> pd.DataFrame:
     for sep in [cfg.io.csv.sep_primary, cfg.io.csv.sep_fallback]:
         try:
             df = pd.read_csv(path, sep=sep, encoding=cfg.io.csv.encoding)
@@ -48,28 +48,28 @@ def _smart_read_csv(path: str, cfg) -> pd.DataFrame:
     return pd.read_csv(path, sep=None, engine="python")
 
 
-def _load_defaults(cfg, logger):
+def cargar_datos_defecto(cfg, logger):
     d = cfg.paths.resources_dir
     if not os.path.isabs(d):
         d = str(_PROJECT_ROOT / d)
     logger.debug(f"buscando CSVs en '{d}'")
-    cons  = _find_default_csv(d, ["*cons*.csv", "*consumo*.csv", "*perfil*.csv"])
-    pv    = _find_default_csv(d, ["*pv*.csv"])
-    buy   = _find_default_csv(d, ["*buy*.csv", "*compra*.csv"])
-    sell  = _find_default_csv(d, ["*sell*.csv", "*venta*.csv"])
+    cons  = buscar_csv(d, ["*cons*.csv", "*consumo*.csv", "*perfil*.csv"])
+    pv    = buscar_csv(d, ["*pv*.csv"])
+    buy   = buscar_csv(d, ["*buy*.csv", "*compra*.csv"])
+    sell  = buscar_csv(d, ["*sell*.csv", "*venta*.csv"])
     logger.info(
         f"  [1.2] archivos: cons={os.path.basename(cons)} | pv={os.path.basename(pv)} | "
         f"buy={os.path.basename(buy)} | sell={os.path.basename(sell)}"
     )
     return (
-        _smart_read_csv(cons, cfg),
-        _smart_read_csv(pv,   cfg),
-        _smart_read_csv(buy,  cfg),
-        _smart_read_csv(sell, cfg),
+        leer_csv(cons, cfg),
+        leer_csv(pv,   cfg),
+        leer_csv(buy,  cfg),
+        leer_csv(sell, cfg),
     )
 
 
-def _override_price_column(df_time: pd.DataFrame, col: str, value: float):
+def precio_fijo_df(df_time: pd.DataFrame, col: str, value: float):
     tcol = "Time" if "Time" in df_time.columns else df_time.columns[0]
     return pd.DataFrame({tcol: df_time[tcol], col: [float(value)] * len(df_time)})
 
@@ -89,7 +89,7 @@ def run_pipeline(
     manual = manual or {}
 
     run_id  = run_id or datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    logger  = _setup_run_logger(cfg, run_id)
+    logger  = crear_logger(cfg, run_id)
     run_tag = f"{cfg.experiment_name}__{run_id}"
 
     solver_name        = str(overrides.get("solver_name") or cfg.optimization.solver)
@@ -111,7 +111,7 @@ def run_pipeline(
     )
 
     if mode == "default":
-        df_c, df_pv, df_buy, df_sell = _load_defaults(cfg, logger)
+        df_c, df_pv, df_buy, df_sell = cargar_datos_defecto(cfg, logger)
 
     elif mode == "csv":
         df_c  = parse_upload(upload_contents["cons"])
@@ -122,8 +122,8 @@ def run_pipeline(
         need_sell_file = (tariff_mode == "indexed") and (not manual_sell_enabled)
 
         if tariff_mode == "fixed":
-            df_buy  = _override_price_column(df_c, "p_buy",  p_buy_manual)
-            df_sell = _override_price_column(df_c, "p_sell", p_sell_manual)
+            df_buy  = precio_fijo_df(df_c, "p_buy",  p_buy_manual)
+            df_sell = precio_fijo_df(df_c, "p_sell", p_sell_manual)
             logger.info(f"  [1.3] precios fijos: p_buy={p_buy_manual} €/kWh | p_sell={p_sell_manual} €/kWh")
         else:
             if need_buy_file and not upload_contents.get("buy"):
@@ -131,13 +131,13 @@ def run_pipeline(
             if need_sell_file and not upload_contents.get("sell"):
                 raise ValueError("Falta CSV de precio venta (indexada) o activa Manual venta.")
 
-            df_buy  = parse_upload(upload_contents["buy"])  if upload_contents.get("buy")  else _override_price_column(df_c, "p_buy",  p_buy_manual)
-            df_sell = parse_upload(upload_contents["sell"]) if upload_contents.get("sell") else _override_price_column(df_c, "p_sell", p_sell_manual)
+            df_buy  = parse_upload(upload_contents["buy"])  if upload_contents.get("buy")  else precio_fijo_df(df_c, "p_buy",  p_buy_manual)
+            df_sell = parse_upload(upload_contents["sell"]) if upload_contents.get("sell") else precio_fijo_df(df_c, "p_sell", p_sell_manual)
 
             if manual_buy_enabled:
-                df_buy  = _override_price_column(df_c, "p_buy",  p_buy_manual)
+                df_buy  = precio_fijo_df(df_c, "p_buy",  p_buy_manual)
             if manual_sell_enabled:
-                df_sell = _override_price_column(df_c, "p_sell", p_sell_manual)
+                df_sell = precio_fijo_df(df_c, "p_sell", p_sell_manual)
 
             buy_src  = f"manual {p_buy_manual} €/kWh"  if manual_buy_enabled  else "CSV"
             sell_src = f"manual {p_sell_manual} €/kWh" if manual_sell_enabled else "CSV"

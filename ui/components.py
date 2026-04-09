@@ -3,7 +3,7 @@ from dash import dcc, html
 
 
 
-def _label_with_info(text: str, tooltip: str, tooltip_id: str):
+def etiqueta_info(text: str, tooltip: str, tooltip_id: str):
     icon_id = f"{tooltip_id}-icon"
     children: list = [html.Span(text, className="field-label")]
     if tooltip:
@@ -42,7 +42,7 @@ def upload_box(id_upload: str, label: str, tooltip: str):
     return dbc.Card(
         dbc.CardBody(
             [
-                _label_with_info(label, tooltip, tip_id),
+                etiqueta_info(label, tooltip, tip_id),
                 dcc.Upload(
                     id=id_upload,
                     children=html.Div(
@@ -67,7 +67,7 @@ def tarifas_card():
     left = dbc.Card(
         dbc.CardBody(
             [
-                _label_with_info(
+                etiqueta_info(
                     "Tipo de Tarifa",
                     "Indexada: precios variables por hora (CSV). "
                     "Mixta: uno manual y el otro por CSV. "
@@ -99,7 +99,7 @@ def tarifas_card():
                         [
                             dbc.Col(
                                 [
-                                    _label_with_info(
+                                    etiqueta_info(
                                         "Dato manual",
                                         "El dato seleccionado se introduce manualmente. "
                                         "El otro se pide por CSV.",
@@ -122,7 +122,7 @@ def tarifas_card():
                                     dbc.Collapse(
                                         html.Div(
                                             [
-                                                _label_with_info("Precio compra (€/kWh)", "", "t-mixed-buy"),
+                                                etiqueta_info("Precio compra (€/kWh)", "", "t-mixed-buy"),
                                                 dbc.Input(
                                                     id="indexed-buy-manual",
                                                     type="number", min=0, step=0.001, value=0.1161,
@@ -135,7 +135,7 @@ def tarifas_card():
                                     dbc.Collapse(
                                         html.Div(
                                             [
-                                                _label_with_info("Precio venta (€/kWh)", "", "t-mixed-sell"),
+                                                etiqueta_info("Precio venta (€/kWh)", "", "t-mixed-sell"),
                                                 dbc.Input(
                                                     id="indexed-sell-manual",
                                                     type="number", min=0, step=0.001, value=0.0532,
@@ -168,14 +168,14 @@ def tarifas_card():
                         [
                             dbc.Col(
                                 [
-                                    _label_with_info("Precio compra (€/kWh)", "", "t-fixed-buy"),
+                                    etiqueta_info("Precio compra (€/kWh)", "", "t-fixed-buy"),
                                     dbc.Input(id="fixed-buy", type="number", min=0, step=0.001, value=0.1161),
                                 ],
                                 md=6,
                             ),
                             dbc.Col(
                                 [
-                                    _label_with_info("Precio venta (€/kWh)", "", "t-fixed-sell"),
+                                    etiqueta_info("Precio venta (€/kWh)", "", "t-fixed-sell"),
                                     dbc.Input(id="fixed-sell", type="number", min=0, step=0.001, value=0.0532),
                                 ],
                                 md=6,

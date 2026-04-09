@@ -15,11 +15,7 @@ validation:
   min_rows_after_merge: 24
 
 ex_ante:
-  mode: equal
-  fixed_coefficients: {}
-  normalize_if_needed: true
   updates_per_year: 4
-  block_mode: month
 
 dynamic:
   block_mode: hour
@@ -43,32 +39,12 @@ io:
     utc: true
     floor: h
     drop_duplicates: true
-  detect:
-    time_patterns:
-      - "\\butc[_\\-\\s]*timestamp\\b"
-      - "\\btimestamp\\b"
-      - "\\bdatetime\\b"
-      - "\\bdate[_\\-\\s]*time\\b"
-      - "\\btime\\b"
-      - "\\bfecha\\b"
-    pv_preferred_cols:
-      - pv_kWh
-      - G_kWh
-      - pv
-      - gen
-      - generation
-    buy_preferred_cols:
-      - p_buy
-      - buy_eur_kWh
-      - price_buy
-      - buy_price
-    sell_preferred_cols:
-      - p_sell
-      - sell_eur_kWh
-      - price_sell
-      - sell_price
-    consumption_prefixes:
-      - cons_
+  columns:
+    time: ["Time", "time", "datetime"]
+    pv: G_kWh
+    buy: p_buy_eur_kwh
+    sell: p_sell_eur_kwh
+    consumption_prefix: cons_
 
 logging:
   directory: logs
