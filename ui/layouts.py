@@ -115,10 +115,8 @@ def barra_superior():
                 [
                     html.Div(id="topbar-title", className="top-bar-title",
                              children="CEC Optimizer"),
-                    html.Div(
-                        "Optimización MILP de asignación de energía FV",
-                        className="top-bar-subtitle",
-                    ),
+                    html.Div(id="topbar-subtitle", className="top-bar-subtitle",
+                             children="Optimización MILP de asignación de energía FV"),
                 ]
             ),
             html.Div(
@@ -512,131 +510,6 @@ def fila_param(label, component):
 def pagina_escenarios():
     return html.Div(
         [
-            html.Div("Capacidad óptima y sensibilidad FV", className="section-title"),
-
-            dbc.Row([
-                dbc.Col(
-                    html.Div([
-                        dbc.Card(
-                            dbc.CardBody([
-                                html.Div("Capacidad óptima recomendada",
-                                         className="chart-title mb-2"),
-                                html.Div(id="bat-optimal-kpi"),
-                            ]),
-                            className="chart-card",
-                        ),
-                        dbc.Card(
-                            dbc.CardBody([
-                                html.Div("Sensibilidad potencia FV",
-                                         className="chart-title mb-1"),
-                                html.Div(
-                                    "Escala la generación entre ¼× y 4× la instalación actual",
-                                    className="chart-note",
-                                ),
-                                dcc.RangeSlider(
-                                    id="scenario-pv-range",
-                                    min=0.25, max=4.0, step=0.25,
-                                    value=[0.5, 3.0],
-                                    marks={0.25: "¼×", 0.5: "½×", 1: "1×",
-                                           2: "2×", 3: "3×", 4: "4×"},
-                                    className="app-slider",
-                                    tooltip={"always_visible": False},
-                                ),
-                                html.Div(className="mt-3"),
-                                dbc.Button(
-                                    [html.I(className="bi bi-play-fill me-2"), "Recalcular"],
-                                    id="scenario-run-btn",
-                                    color="primary",
-                                    style={"fontWeight": "600", "width": "100%"},
-                                ),
-                                dbc.Spinner(
-                                    html.Div(id="scenario-status", className="mt-2",
-                                             style={"fontSize": "11px",
-                                                    "color": "var(--text-muted)"}),
-                                    size="sm", color="primary",
-                                ),
-                            ]),
-                            className="chart-card",
-                        ),
-                    ], id="bat-left-col",
-                       style={"display": "flex", "flexDirection": "column", "gap": "16px"}),
-                    md=4,
-                ),
-
-                dbc.Col(
-                    dbc.Card(
-                        dbc.CardBody([
-                            html.Div([
-                                html.Div("Ahorro adicional vs capacidad de batería",
-                                         className="chart-title"),
-                                html.Div(
-                                    "Estimación greedy. Ejecuta con batería habilitada para resultado LP exacto.",
-                                    className="chart-note",
-                                ),
-                            ], id="bat-chart-header"),
-                            dcc.Graph(
-                                id="fig-bat-optimal",
-                                config={"displayModeBar": False},
-                                responsive=True,
-                                style={"height": "260px"},
-                            ),
-                        ]),
-                        className="chart-card h-100",
-                    ),
-                    md=8,
-                ),
-            ], className="g-3 mt-3", style={"alignItems": "stretch"}),
-
-            html.Div("Análisis de escenarios FV", className="section-title"),
-            dbc.Row([
-                dbc.Col(
-                    dbc.Card(
-                        dbc.CardBody([
-                            html.Div("Ahorro anual (€)",
-                                     className="chart-title"),
-                            dcc.Graph(
-                                id="fig-scenario-savings",
-                                config={"displayModeBar": False},
-                                style={"height": "230px"},
-                            ),
-                        ]),
-                        className="chart-card",
-                    ),
-                    md=4,
-                ),
-                dbc.Col(
-                    dbc.Card(
-                        dbc.CardBody([
-                            html.Div("Porcentaje de autoconsumo (%)",
-                                     className="chart-title"),
-                            dcc.Graph(
-                                id="fig-scenario-self",
-                                config={"displayModeBar": False},
-                                style={"height": "230px"},
-                            ),
-                        ]),
-                        className="chart-card",
-                    ),
-                    md=4,
-                ),
-                dbc.Col(
-                    dbc.Card(
-                        dbc.CardBody([
-                            html.Div("Excedente exportado (kWh)",
-                                     className="chart-title"),
-                            dcc.Graph(
-                                id="fig-scenario-export",
-                                config={"displayModeBar": False},
-                                style={"height": "230px"},
-                            ),
-                        ]),
-                        className="chart-card",
-                    ),
-                    md=4,
-                ),
-            ], className="g-3 mt-2"),
-
-            html.Div("Viabilidad financiera de la batería", className="section-title"),
 
             dbc.Row([
                 dbc.Col(kpi_card("bat-kpi-fin-payback",  "Período de retorno",  variant="brand",   show_icon=False), md=6, lg=3),
@@ -740,18 +613,6 @@ def pagina_escenarios():
                        "padding": "32px 16px"},
             ),
 
-            html.Div(
-                [
-                    html.I(className="bi bi-battery-charging empty-state-icon"),
-                    html.Div("Ejecuta el modelo primero", className="empty-state-title"),
-                    html.Div(
-                        "Carga datos y ejecuta el modelo para ver el análisis de batería.",
-                        className="empty-state-body",
-                    ),
-                ],
-                id="escenarios-empty",
-                className="empty-state",
-            ),
         ],
         id="page-escenarios",
         className="inner-page",

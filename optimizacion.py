@@ -417,8 +417,8 @@ def resolver_lp_bateria(
             RangeSet(2, T),
             rule=lambda m, t: m.SOC[t] == m.SOC[t - 1] + eta_c * m.charge[t] - m.discharge[t] / eta_d
         )
-    # la batería termina al menos tan cargada como al inicio
-    m.soc_cyclic = Constraint(expr=m.SOC[T] >= soc_init)
+    # la batería termina vacía: se vende toda la energía almacenada
+    m.soc_terminal = Constraint(expr=m.SOC[T] == 0)
 
     def obj_rule(m):
         total = 0.0
@@ -582,7 +582,6 @@ def optimizar(
     solver_name: str | None = None,
     dynamic_block_mode: str | None = None,
     battery_cfg: BatteryConfig | None = None,
-    _base_state: dict | None = None,
 ):
     cfg = config
     solver_name        = solver_name        or cfg.optimization.solver
@@ -591,93 +590,54 @@ def optimizar(
 
     run_battery = battery_cfg is not None and battery_cfg.enabled
 
-    if _base_state is not None and run_battery:
-        logger.info("[2/7] → [6.5/7] resultados base cacheados — ejecutando solo optimización con batería")
-        df             = _base_state["df"]
-        users          = _base_state["users"]
-        T              = len(df)
-        U              = len(users)
-        b_of_t_ex      = _base_state["b_of_t_ex"]
-        B_ex           = _base_state["B_ex"]
-        b_of_t_dyn     = _base_state["b_of_t_dyn"]
-        B_dyn          = _base_state["B_dyn"]
-        solver         = _base_state["solver"]
-        solver_used    = _base_state["solver_used"]
-        tee            = _base_state["tee"]
-        self_ex_ts     = _base_state["self_ex_ts"]
-        imp_ex_ts      = _base_state["imp_ex_ts"]
-        exp_ex_ts      = _base_state["exp_ex_ts"]
-        cost_ex_ts     = _base_state["cost_ex_ts"]
-        alpha_ex       = _base_state["alpha_ex"]
-        pu_self_ex     = _base_state["pu_self_ex"]
-        pu_imp_ex      = _base_state["pu_imp_ex"]
-        self_dyn_ts    = _base_state["self_dyn_ts"]
-        imp_dyn_ts     = _base_state["imp_dyn_ts"]
-        exp_dyn_ts     = _base_state["exp_dyn_ts"]
-        cost_dyn_ts    = _base_state["cost_dyn_ts"]
-        alpha_dyn      = _base_state["alpha_dyn"]
-        pu_self_dyn    = _base_state["pu_self_dyn"]
-        pu_imp_dyn     = _base_state["pu_imp_dyn"]
-        self_fx_ts     = _base_state["self_fx_ts"]
-        imp_fx_ts      = _base_state["imp_fx_ts"]
-        exp_fx_ts      = _base_state["exp_fx_ts"]
-        cost_fx_ts     = _base_state["cost_fx_ts"]
-        alpha_fx       = _base_state["alpha_fx"]
-        pu_self_fx     = _base_state["pu_self_fx"]
-        pu_imp_fx      = _base_state["pu_imp_fx"]
-        p_buy_fx       = _base_state["p_buy_fx"]
-        p_sell_fx      = _base_state["p_sell_fx"]
-        updates_per_year   = _base_state["updates_per_year"]
-        dynamic_block_mode = _base_state["dynamic_block_mode"]
-    else:
-        logger.info("[2/7] PREPROCESO")
-        prepared = prepare_inputs(df_c, df_pv, df_buy, df_sell)
-        df       = prepared.df.copy()
-        users    = prepared.users
+    logger.info("[2/7] PREPROCESO")
+    prepared = prepare_inputs(df_c, df_pv, df_buy, df_sell)
+    df       = prepared.df.copy()
+    users    = prepared.users
 
-        logger.info("[3/7] VALIDACIÓN")
-        issues = validate_prepared_inputs(prepared, strict=cfg.validation.strict)
-        errors = [i for i in issues if i.level == "ERROR"]
-        if errors:
-            for e in errors:
-                logger.error(f"  ERROR [{e.code}] {e.message}")
-            raise ValueError("Validation failed:\n" + "\n".join(f"[{e.code}] {e.message}" for e in errors))
+    logger.info("[3/7] VALIDACIÓN")
+    issues = validate_prepared_inputs(prepared, strict=cfg.validation.strict)
+    errors = [i for i in issues if i.level == "ERROR"]
+    if errors:
+        for e in errors:
+            logger.error(f"  ERROR [{e.code}] {e.message}")
+        raise ValueError("Validation failed:\n" + "\n".join(f"[{e.code}] {e.message}" for e in errors))
 
-        df = df.sort_values("Time").reset_index(drop=True)
-        df["D_total"] = df[users].sum(axis=1)
-        df["G"]       = df["pv_kWh"]
-        T = len(df)
-        U = len(users)
+    df = df.sort_values("Time").reset_index(drop=True)
+    df["D_total"] = df[users].sum(axis=1)
+    df["G"]       = df["pv_kWh"]
+    T = len(df)
+    U = len(users)
 
-        if T == 0 or U == 0:
-            raise ValueError("Datos vacíos tras preprocess.")
+    if T == 0 or U == 0:
+        raise ValueError("Datos vacíos tras preprocess.")
 
-        logger.info("[4/7] CONFIGURACIÓN")
-        solver, solver_used = elegir_solver(solver_name, cfg.optimization.solver_fallbacks, logger)
-        tee = bool(cfg.optimization.tee)
+    logger.info("[4/7] CONFIGURACIÓN")
+    solver, solver_used = elegir_solver(solver_name, cfg.optimization.solver_fallbacks, logger)
+    tee = bool(cfg.optimization.tee)
 
-        b_list_ex, b_of_t_ex   = bloques_ex_ante(df["Time"], updates_per_year)
-        b_list_dyn, b_of_t_dyn = calcular_bloques(df["Time"], str(dynamic_block_mode))
-        B_ex  = len(b_list_ex)
-        B_dyn = len(b_list_dyn)
+    b_list_ex, b_of_t_ex   = bloques_ex_ante(df["Time"], updates_per_year)
+    b_list_dyn, b_of_t_dyn = calcular_bloques(df["Time"], str(dynamic_block_mode))
+    B_ex  = len(b_list_ex)
+    B_dyn = len(b_list_dyn)
 
-        logger.info(f"  [4.1] datos: T={T} | U={U} | D_total={df['D_total'].sum():.1f} kWh | G_total={df['G'].sum():.1f} kWh")
-        logger.info(f"  [4.2] solver: '{solver_used}' | tee={tee}")
-        logger.info(f"  [4.3] ex ante: {B_ex} bloques (updates_per_year={updates_per_year})")
-        logger.info(f"  [4.4] dinámico: {B_dyn} bloques (mode='{dynamic_block_mode}')")
+    logger.info(f"  [4.1] datos: T={T} | U={U} | D_total={df['D_total'].sum():.1f} kWh | G_total={df['G'].sum():.1f} kWh")
+    logger.info(f"  [4.2] solver: '{solver_used}' | tee={tee}")
+    logger.info(f"  [4.3] ex ante: {B_ex} bloques (updates_per_year={updates_per_year})")
+    logger.info(f"  [4.4] dinámico: {B_dyn} bloques (mode='{dynamic_block_mode}')")
 
-        logger.info("[5/7] OPTIMIZACIÓN EX ANTE")
-        (self_ex_ts, imp_ex_ts, exp_ex_ts, cost_ex_ts,
-         alpha_ex, pu_self_ex, pu_imp_ex) = resolver_lp(df, users, b_of_t_ex, B_ex, solver, tee, logger, step_num=5)
+    logger.info("[5/7] OPTIMIZACIÓN EX ANTE")
+    (self_ex_ts, imp_ex_ts, exp_ex_ts, cost_ex_ts,
+     alpha_ex, pu_self_ex, pu_imp_ex) = resolver_lp(df, users, b_of_t_ex, B_ex, solver, tee, logger, step_num=5)
 
-        logger.info("[6/7] OPTIMIZACIÓN DINÁMICA")
-        (self_dyn_ts, imp_dyn_ts, exp_dyn_ts, cost_dyn_ts,
-         alpha_dyn, pu_self_dyn, pu_imp_dyn) = resolver_lp(df, users, b_of_t_dyn, B_dyn, solver, tee, logger, step_num=6)
+    logger.info("[6/7] OPTIMIZACIÓN DINÁMICA")
+    (self_dyn_ts, imp_dyn_ts, exp_dyn_ts, cost_dyn_ts,
+     alpha_dyn, pu_self_dyn, pu_imp_dyn) = resolver_lp(df, users, b_of_t_dyn, B_dyn, solver, tee, logger, step_num=6)
 
-        logger.info("[6.5/7] REPARTO FIJO PROPORCIONAL (baseline)")
-        (self_fx_ts, imp_fx_ts, exp_fx_ts, cost_fx_ts,
-         alpha_fx, pu_self_fx, pu_imp_fx,
-         p_buy_fx, p_sell_fx) = reparto_fijo(df, users, logger)
+    logger.info("[6.5/7] REPARTO FIJO PROPORCIONAL (baseline)")
+    (self_fx_ts, imp_fx_ts, exp_fx_ts, cost_fx_ts,
+     alpha_fx, pu_self_fx, pu_imp_fx,
+     p_buy_fx, p_sell_fx) = reparto_fijo(df, users, logger)
     if run_battery:
         bat_cap  = float(battery_cfg.capacity_kwh)
         bat_pow  = float(battery_cfg.power_kw)
@@ -905,25 +865,5 @@ def optimizar(
             extra_cols[f"alpha_bat_{s}"]  = [alpha_bat.get((u_idx, b_of_t_dyn[t + 1]), 0.0) for t in range(T)]
 
     df_ts = pd.concat([df_ts, pd.DataFrame(extra_cols, index=df_ts.index)], axis=1)
-
-    if not run_battery:
-        summary["_base_state"] = {
-            "df": df, "users": users,
-            "b_of_t_ex": b_of_t_ex, "B_ex": B_ex,
-            "b_of_t_dyn": b_of_t_dyn, "B_dyn": B_dyn,
-            "solver": solver, "solver_used": solver_used, "tee": tee,
-            "self_ex_ts": self_ex_ts, "imp_ex_ts": imp_ex_ts,
-            "exp_ex_ts": exp_ex_ts,  "cost_ex_ts": cost_ex_ts,
-            "alpha_ex": alpha_ex, "pu_self_ex": pu_self_ex, "pu_imp_ex": pu_imp_ex,
-            "self_dyn_ts": self_dyn_ts, "imp_dyn_ts": imp_dyn_ts,
-            "exp_dyn_ts": exp_dyn_ts,   "cost_dyn_ts": cost_dyn_ts,
-            "alpha_dyn": alpha_dyn, "pu_self_dyn": pu_self_dyn, "pu_imp_dyn": pu_imp_dyn,
-            "self_fx_ts": self_fx_ts, "imp_fx_ts": imp_fx_ts,
-            "exp_fx_ts": exp_fx_ts,   "cost_fx_ts": cost_fx_ts,
-            "alpha_fx": alpha_fx, "pu_self_fx": pu_self_fx, "pu_imp_fx": pu_imp_fx,
-            "p_buy_fx": p_buy_fx, "p_sell_fx": p_sell_fx,
-            "updates_per_year": updates_per_year,
-            "dynamic_block_mode": str(dynamic_block_mode),
-        }
 
     return summary, df_ts

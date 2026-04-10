@@ -19,7 +19,7 @@ def kpi_card(
     value_id: str,
     title: str,
     icon: str = "bi-graph-up",
-    variant: str = "brand",       # brand | accent | success | warning
+    variant: str = "brand",      
     show_icon: bool = True,
 ):
     body = []

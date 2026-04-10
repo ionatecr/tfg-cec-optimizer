@@ -619,12 +619,22 @@ def register_callbacks(app, cfg):
     page_style_outputs = [Output(f"page-{pid}", "style") for pid in PAGE_IDS]
     nav_class_outputs  = [Output(f"nav-{pid}", "className") for pid in PAGE_IDS]
 
+    PAGE_SUBTITLES = {
+        "config":      "Optimización MILP de asignación de energía FV",
+        "comparativa": "Optimización MILP de asignación de energía FV",
+        "usuarios":    "Optimización MILP de asignación de energía FV",
+        "energia":     "Optimización MILP de asignación de energía FV",
+        "escenarios":  "Análisis de la viabilidad energética de la batería",
+        "export":      "Optimización MILP de asignación de energía FV",
+    }
+
     @app.callback(
         page_style_outputs + nav_class_outputs +
         [
-            Output("topbar-title", "children"),
-            Output("status-dot",   "className"),
-            Output("status-label", "children"),
+            Output("topbar-title",    "children"),
+            Output("topbar-subtitle", "children"),
+            Output("status-dot",      "className"),
+            Output("status-label",    "children"),
         ],
         Input("nav-store", "data"),
         Input("results-store", "data"),
@@ -645,7 +655,8 @@ def register_callbacks(app, cfg):
             base = "nav-item-btn"
             nav_classes.append(f"{base} active" if pid == current_page else base)
 
-        title = PAGE_TITLES.get(current_page, "CEC Optimizer")
+        title    = PAGE_TITLES.get(current_page, "CEC Optimizer")
+        subtitle = PAGE_SUBTITLES.get(current_page, "Optimización MILP de asignación de energía FV")
 
         if has_results:
             dot_cls = "status-dot ready"
@@ -654,7 +665,7 @@ def register_callbacks(app, cfg):
             dot_cls = "status-dot"
             status  = "Sin resultados"
 
-        return page_styles + nav_classes + [title, dot_cls, status]
+        return page_styles + nav_classes + [title, subtitle, dot_cls, status]
 
     @app.callback(
         Output("adv-collapse", "is_open"),
@@ -831,30 +842,32 @@ def register_callbacks(app, cfg):
         last_summary  = {}
         last_ts       = pd.DataFrame()
         first_dm      = dynamic_modes_list[0] if dynamic_modes_list else "hour"
-        session_id    = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        session_id    = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")[:23]
         run_cache     = {}  # (exante_updates, dynamic_mode) -> (summary, ts, run_tag, base_state)
 
-        def _cached_run(u, dm, label_for_err):
-            key = (u, dm)
+        def _cached_run(u, dm, label_for_err, bat_ov=None):
+            key = (u, dm, bool(bat_ov))
             if key in run_cache:
                 return run_cache[key], None
             ov = dict(overrides_base, exante_updates_per_year=u, dynamic_block_mode=dm)
+            if bat_ov:
+                ov.update(bat_ov)
             try:
-                results, run_tag, bs = run_pipeline(
+                results, run_tag, _ = run_pipeline(
                     cfg, mode=mode, upload_contents=upload_contents, manual={}, overrides=ov,
                     run_id=session_id,
                 )
             except Exception as e:
                 return None, _err(f"Error en {label_for_err}: {e}")
             s, t = extraer_resultados(results)
-            run_cache[key] = (s, t, run_tag, bs)
+            run_cache[key] = (s, t, run_tag)
             return run_cache[key], None
 
         for u, ex_label in exante_defs:
-            result, err = _cached_run(u, first_dm, ex_label)
+            result, err = _cached_run(u, first_dm, ex_label, bat_ov=None)
             if err:
                 return err
-            summary, ts, run_tag, _ = result
+            summary, ts, run_tag = result
 
             last_run_tag = run_tag
             last_summary, last_ts = summary, ts
@@ -886,7 +899,7 @@ def register_callbacks(app, cfg):
             result, err = _cached_run(u_for_dyn, dm, dyn_label.get(dm, dm))
             if err:
                 return err
-            summary, ts, run_tag, _ = result
+            summary, ts, run_tag = result
 
             last_run_tag = run_tag
             last_summary, last_ts = summary, ts
@@ -914,83 +927,58 @@ def register_callbacks(app, cfg):
                 series[label] = {"columns": list(ts.columns), "rows": ts.to_dict("records")}
 
         use_battery = bool(battery_enabled and "enabled" in (battery_enabled or []))
-        if use_battery and last_summary:
-            bat_dm = "hour"  # batería siempre con bloques horarios
-            ov_bat = dict(
-                overrides_base,
-                exante_updates_per_year=(4 if "rd" in exante_mode_list else 0),
-                dynamic_block_mode=bat_dm,
-                battery_enabled=True,
-                battery_capacity_kwh=float(bat_capacity or 10.0),
-                battery_power_kw=float(bat_power or 5.0),
-                battery_eta_c=float((bat_eta_c or 95)) / 100.0,
-                battery_eta_d=float((bat_eta_d or 95)) / 100.0,
-                battery_soc_init=cfg.battery.initial_soc_fraction,
-            )
+        if use_battery:
+            bat_dm    = "hour"
+            u_bat     = 4 if "rd" in exante_mode_list else 0
             bat_label = "Dinámico con batería"
-            bat_key = (4 if "rd" in exante_mode_list else 0, bat_dm)
-            cached_bat = run_cache.get(bat_key)
-            bat_base_state = cached_bat[3] if cached_bat else None
-            try:
-                results_bat, run_tag_bat, _ = run_pipeline(
-                    cfg, mode=mode, upload_contents=upload_contents,
-                    manual={}, overrides=ov_bat, run_id=session_id,
-                    base_state=bat_base_state,
-                )
+            bat_ov    = {
+                "battery_enabled":      True,
+                "battery_capacity_kwh": float(bat_capacity or 10.0),
+                "battery_power_kw":     float(bat_power or 5.0),
+                "battery_eta_c":        float((bat_eta_c or 95)) / 100.0,
+                "battery_eta_d":        float((bat_eta_d or 95)) / 100.0,
+                "battery_soc_init":     cfg.battery.initial_soc_fraction,
+            }
+            result_bat, err_bat = _cached_run(u_bat, bat_dm, bat_label, bat_ov=bat_ov)
+            if err_bat:
+                models.append({
+                    "Modelo":  bat_label, "Tipo": "bateria",
+                    "Coste (€)": None, "% Autoconsumo": None, "% Excedente": None,
+                    "% Importación": None, "Autoconsumo (kWh)": None,
+                    "Excedente (kWh)": None, "Importación (kWh)": None,
+                    "cost_per_user": {}, "users_display": [], "_error": str(err_bat),
+                })
+            else:
+                summary_bat, ts_bat, run_tag_bat = result_bat
                 last_run_tag = run_tag_bat
-                summary_bat, ts_bat = extraer_resultados(results_bat)
-
                 if summary_bat.get("battery_enabled") and summary_bat.get("cost_bat") is not None:
-                    cost_bat    = float(summary_bat["cost_bat"])
-                    self_bat    = float(summary_bat.get("self_bat", 0) or 0)
-                    imp_bat     = float(summary_bat.get("imp_bat", 0) or 0)
-                    exp_bat     = float(summary_bat.get("exp_bat", 0) or 0)
-                    disch_bat   = float(summary_bat.get("discharge_bat_total", 0) or 0)
-                    d_tot       = float(summary_bat.get("demand_total", 1) or 1)
-                    g_tot       = float(summary_bat.get("gen_total", 1) or 1)
-                    self_eff_b = self_bat + disch_bat
-                    self_pct_b = self_eff_b / d_tot * 100 if d_tot > 0 else 0
-                    imp_pct_b  = imp_bat   / d_tot * 100 if d_tot > 0 else 0
-                    exp_pct_b  = exp_bat   / g_tot * 100 if g_tot > 0 else 0
-                    pu_bat     = coste_por_usuario(summary_bat, "bat")
-                    # si no hay coste por usuario de batería, usa el dinámico
-                    if not pu_bat:
-                        pu_bat = coste_por_usuario(summary_bat, "prop")
+                    cost_bat   = float(summary_bat["cost_bat"])
+                    self_bat   = float(summary_bat.get("self_bat", 0) or 0)
+                    imp_bat    = float(summary_bat.get("imp_bat", 0) or 0)
+                    exp_bat    = float(summary_bat.get("exp_bat", 0) or 0)
+                    disch_bat  = float(summary_bat.get("discharge_bat_total", 0) or 0)
+                    d_tot      = float(summary_bat.get("demand_total", 1) or 1)
+                    g_tot      = float(summary_bat.get("gen_total", 1) or 1)
+                    self_pct_b = (self_bat + disch_bat) / d_tot * 100 if d_tot > 0 else 0
+                    imp_pct_b  = imp_bat / d_tot * 100 if d_tot > 0 else 0
+                    exp_pct_b  = exp_bat / g_tot * 100 if g_tot > 0 else 0
+                    pu_bat     = coste_por_usuario(summary_bat, "bat") or coste_por_usuario(summary_bat, "prop")
                     models.append({
-                        "Modelo":                bat_label,
-                        "Tipo":                  "bateria",
-                        "Coste (€)":             cost_bat,
-                        "% Autoconsumo":         self_pct_b,
-                        "% Excedente":           exp_pct_b,
-                        "% Importación":         imp_pct_b,
-                        "Autoconsumo (kWh)":     self_bat,
-                        "Excedente (kWh)":       exp_bat,
-                        "Importación (kWh)":     imp_bat,
-                        "cost_per_user":         pu_bat,
-                        "users_display":         list(pu_bat.keys()),
-                        "battery_capacity_kwh":  float(bat_capacity or 10.0),
+                        "Modelo":               bat_label,
+                        "Tipo":                 "bateria",
+                        "Coste (€)":            cost_bat,
+                        "% Autoconsumo":        self_pct_b,
+                        "% Excedente":          exp_pct_b,
+                        "% Importación":        imp_pct_b,
+                        "Autoconsumo (kWh)":    self_bat,
+                        "Excedente (kWh)":      exp_bat,
+                        "Importación (kWh)":    imp_bat,
+                        "cost_per_user":        pu_bat,
+                        "users_display":        list(pu_bat.keys()),
+                        "battery_capacity_kwh": float(bat_capacity or 10.0),
                     })
                     if isinstance(ts_bat, pd.DataFrame) and not ts_bat.empty:
-                        series[bat_label] = {
-                            "columns": list(ts_bat.columns),
-                            "rows":    ts_bat.to_dict("records"),
-                        }
-            except Exception as e_bat:
-                # Si la batería falla, continúa sin ella (no bloquear el resto)
-                models.append({
-                    "Modelo":  bat_label,
-                    "Tipo":    "bateria",
-                    "Coste (€)": None,
-                    "% Autoconsumo": None,
-                    "% Excedente": None,
-                    "% Importación": None,
-                    "Autoconsumo (kWh)": None,
-                    "Excedente (kWh)": None,
-                    "Importación (kWh)": None,
-                    "cost_per_user": {},
-                    "users_display": [],
-                    "_error": str(e_bat),
-                })
+                        series[bat_label] = {"columns": list(ts_bat.columns), "rows": ts_bat.to_dict("records")}
 
         # reparto fijo proporcional (sin optimizador)
         if last_summary:
@@ -1773,8 +1761,14 @@ def register_callbacks(app, cfg):
 
         series  = data["series"]
         models  = data.get("models", [])
-        first_key = next(iter(series))
-        ts_raw  = get_serie(series, first_key)
+        # Usar la serie del modelo de menor coste (coherente con el panel KPI),
+        # si no hay modelos válidos, caer en el primero disponible.
+        valid_models = [m for m in models if m.get("Coste (€)") is not None and m["Modelo"] in series]
+        if valid_models:
+            best_key = min(valid_models, key=lambda m: m["Coste (€)"])["Modelo"]
+        else:
+            best_key = next(iter(series))
+        ts_raw  = get_serie(series, best_key)
         if ts_raw.empty:
             return [], _no, _no_cards, "No se encontraron series de datos."
 
@@ -1879,9 +1873,9 @@ def register_callbacks(app, cfg):
 
         fig_monthly_balance = go.Figure()
 
-        self_col = primera_col(ts.columns, ["self_prop", "self_ex_ante"])
-        imp_col  = primera_col(ts.columns, ["imp_prop",  "imp_ex_ante"])
-        exp_col  = primera_col(ts.columns, ["exp_prop",  "exp_ex_ante"])
+        self_col = primera_col(ts.columns, ["self_bat", "self_prop", "self_ex_ante"])
+        imp_col  = primera_col(ts.columns, ["imp_bat",  "imp_prop",  "imp_ex_ante"])
+        exp_col  = primera_col(ts.columns, ["exp_bat",  "exp_prop",  "exp_ex_ante"])
 
         if not (self_col and imp_col and exp_col) and user_cols and dem_col and pv_col_e:
             ts["_self_total"] = ts[user_cols].sum(axis=1)
@@ -1902,11 +1896,11 @@ def register_callbacks(app, cfg):
                 for s, i in zip(mon_self.tolist(), mon_imp.tolist())
             ]
 
-            BAR_MAX_H = 160
+            BAR_MAX_H = 280
             max_total = max((float(mon_self.iloc[mi]) + float(mon_imp.iloc[mi]) +
                              float(mon_exp.iloc[mi])) for mi in range(12)) or 1.0
 
-            def _seg(bg, h, val, r_top=False, r_bot=False):
+            def _seg(bg, h, val, r_top=False, r_bot=False, min_label_h=10):
                 if h <= 0:
                     return None
                 br = []
@@ -1916,7 +1910,7 @@ def register_callbacks(app, cfg):
                 return html.Div(
                     html.Span(f"{formato_num(val, 0)}", style={
                         "color": "white", "fontSize": "10px", "fontWeight": "800",
-                    }) if h >= 10 else None,
+                    }) if h >= min_label_h else None,
                     style={
                         "height": f"{h}px", "background": bg,
                         "display": "flex", "alignItems": "center",
@@ -1935,9 +1929,11 @@ def register_callbacks(app, cfg):
                 cv = float(coverage_line[mi])
                 total = sv + iv + ev
                 has_data = total > 1.0
+                EXP_MIN_H = 14  # altura mínima visible para excedente
                 bar_h   = int(total / max_total * BAR_MAX_H) if has_data else 4
+                e_h_raw = int(ev / total * bar_h) if has_data and ev > 0 else 0
+                e_h = max(EXP_MIN_H, e_h_raw) if e_h_raw > 0 else 0
                 s_h = max(1, int(sv / total * bar_h)) if has_data and sv > 0 else 0
-                e_h = max(1, int(ev / total * bar_h)) if has_data and ev > 0 else 0
                 i_h = max(0, bar_h - s_h - e_h)
 
                 top_seg  = "exp" if e_h > 0 else ("imp" if i_h > 0 else "self")
@@ -1946,7 +1942,7 @@ def register_callbacks(app, cfg):
                 month_cards.append(html.Div([
                     html.Div(_MESES[mi], className="mc-month"),
                     html.Div([
-                        _seg("#F39C12", e_h, ev, r_top=True,  r_bot=(top_seg=="exp" and bot_seg=="exp")),
+                        _seg("#F39C12", e_h, ev, r_top=True,  r_bot=(top_seg=="exp" and bot_seg=="exp"), min_label_h=EXP_MIN_H),
                         _seg("#E74C3C", i_h, iv, r_top=(top_seg=="imp"), r_bot=(bot_seg=="imp")),
                         _seg("#18BC9C", s_h, sv, r_top=(top_seg=="self"), r_bot=True),
                     ], style={
@@ -2340,21 +2336,21 @@ def register_callbacks(app, cfg):
         Output("bat-financiero-empty",      "style"),
         Output("bat-fin-capacity-display",  "children"),
         Output("fin-results-store",         "data"),
-        Input("bat-optimal-store",   "data"),
+        Input("results-store",       "data"),
         Input("bat-fin-cost-kwp",    "value"),
         Input("bat-fin-om-pct",      "value"),
         Input("bat-fin-inflation",   "value"),
         Input("bat-fin-discount",    "value"),
         Input("bat-fin-lifetime",    "value"),
-        State("results-store",       "data"),
+        State("bat-capacity",        "value"),
     )
-    def render_financiero(bat_store, cost_kwp, om_pct, inflation, discount, lifetime, data):
+    def render_financiero(data, cost_kwp, om_pct, inflation, discount, lifetime, bat_capacity_val):
         _no = grafico_vacio("Sin datos de análisis.")
         empty_style = {"display": "flex"}
         hidden_style = {"display": "none"}
 
-        optimal_cap = float((bat_store or {}).get("optimal_cap") or 0)
-        cap_display = f"{optimal_cap:.0f} kWh" if optimal_cap > 0 else "— (ejecuta el modelo)"
+        optimal_cap = float(bat_capacity_val or 10.0)
+        cap_display = f"{optimal_cap:.0f} kWh"
 
         if not data or "models" not in data or not data["models"]:
             return "—", "—", "—", "—", _no, _no, empty_style, cap_display, None
@@ -2365,20 +2361,13 @@ def register_callbacks(app, cfg):
         if df_m.empty:
             return "—", "—", "—", "—", _no, _no, empty_style, cap_display, None
 
-        best_cost = float(df_m["Coste (€)"].min())
-        modelos_list = df_m["Modelo"].astype(str).tolist()
-        if "Ex ante RD 244/2019" in modelos_list:
-            ref_row = df_m[df_m["Modelo"] == "Ex ante RD 244/2019"]
-        elif "Ex ante Rígido" in modelos_list:
-            ref_row = df_m[df_m["Modelo"] == "Ex ante Rígido"]
-        else:
-            ref_row = df_m[df_m["Modelo"].str.contains("ex ante|rígido|rigido", case=False, na=False)]
-        if ref_row.empty:
-            ref_row = df_m[df_m["Coste (€)"] == df_m["Coste (€)"].max()]
-        ref_cost = float(ref_row.iloc[0]["Coste (€)"]) if not ref_row.empty else best_cost
-
-        bat_optimal_sav = float((bat_store or {}).get("optimal_sav") or 0)
-        annual_savings = bat_optimal_sav if bat_optimal_sav > 0 else max(ref_cost - best_cost, 0.0)
+        horario_row = df_m[df_m["Modelo"] == "Dinámico Horario"]
+        bat_row     = df_m[df_m["Tipo"]   == "bateria"]
+        if horario_row.empty or bat_row.empty:
+            return "—", "—", "—", "—", _no, _no, empty_style, cap_display, None
+        cost_horario = float(horario_row.iloc[0]["Coste (€)"])
+        cost_bat_val = float(bat_row.iloc[0]["Coste (€)"])
+        annual_savings = max(cost_horario - cost_bat_val, 0.0)
 
         cost_kwp_v  = float(cost_kwp)  if cost_kwp  is not None else 250.0
         om_pct_v    = (float(om_pct)   if om_pct    is not None else 2.5)  / 100.0
@@ -2572,13 +2561,7 @@ def register_callbacks(app, cfg):
         }
         return kpi_pb, kpi_npv, kpi_irr, kpi_sav, fig_cf, fig_wf, hidden_style, cap_display, fin_store
 
-    @app.callback(
-        Output("fig-bat-optimal",   "figure"),
-        Output("bat-optimal-kpi",   "children"),
-        Output("bat-optimal-store", "data"),
-        Input("results-store", "data"),
-    )
-    def render_bat_optimal(data):
+    def render_bat_optimal(data):  # disabled – kept for reference
         _no = grafico_vacio("Ejecuta el modelo para ver la capacidad óptima.")
         _empty_kpi = html.Div("—", style={"fontSize": "28px", "fontWeight": "900",
                                            "color": "var(--text-muted)"})
@@ -2723,35 +2706,7 @@ def register_callbacks(app, cfg):
         ], style={"padding": "2px 0"})
         return fig, kpi_el, {"optimal_cap": optimal_cap, "optimal_sav": optimal_sav}
 
-    app.clientside_callback(
-        """
-        function(kpi) {
-            var leftCol  = document.getElementById('bat-left-col');
-            var header   = document.getElementById('bat-chart-header');
-            if (!leftCol || !header) return window.dash_clientside.no_update;
-            var leftH  = leftCol.offsetHeight;
-            var headH  = header.offsetHeight;
-            if (leftH < 50) return window.dash_clientside.no_update;
-            // Padding del CardBody: 16px arriba + 12px abajo = 28px
-            var graphH = Math.max(150, leftH - headH - 28);
-            return {height: graphH + 'px'};
-        }
-        """,
-        Output("fig-bat-optimal", "style"),
-        Input("bat-optimal-kpi", "children"),
-    )
-
-    @app.callback(
-        Output("fig-scenario-savings", "figure"),
-        Output("fig-scenario-self",    "figure"),
-        Output("fig-scenario-export",  "figure"),
-        Output("scenario-status",      "children"),
-        Output("escenarios-empty",     "style"),
-        Input("scenario-run-btn",      "n_clicks"),
-        Input("results-store",         "data"),
-        State("scenario-pv-range",     "value"),
-    )
-    def render_scenarios(n, data, pv_range):
+    def render_scenarios(n, data, pv_range):  # disabled – kept for reference
         _no = grafico_vacio("Ejecuta el análisis de escenarios.")
         empty_style  = {"display": "flex"}
         hidden_style = {"display": "none"}
@@ -2975,19 +2930,27 @@ def register_callbacks(app, cfg):
         State("export-sw-bateria_fin", "value"),
         State("export-sw-bateria_soc", "value"),
         State("fin-results-store",     "data"),
+        State("battery-enabled",       "value"),
         prevent_initial_call=True,
     )
     def export_excel(_, data, run_tag, sw_comp, sw_ser, sw_cos, sw_alp,
-                     sw_bat_fin, sw_bat_soc, fin_store):
+                     sw_bat_fin, sw_bat_soc, fin_store, battery_enabled):
         if not data or "models" not in data:
             return no_update
+        bat_active = bool(battery_enabled and "enabled" in (battery_enabled or []))
+        has_bat_model = any(
+            m.get("Tipo") == "bateria" and m.get("Coste (€)") is not None
+            for m in (data.get("models") or [])
+        )
         sections = []
         if "comparativa" in (sw_comp    or []): sections.append("comparativa")
         if "series"      in (sw_ser     or []): sections.append("series")
         if "costes"      in (sw_cos     or []): sections.append("costes")
         if "alpha"       in (sw_alp     or []): sections.append("alpha")
-        if "bateria_fin" in (sw_bat_fin or []) and fin_store: sections.append("bateria_fin")
-        if "bateria_soc" in (sw_bat_soc or []): sections.append("bateria_soc")
+        if bat_active and has_bat_model and "bateria_fin" in (sw_bat_fin or []) and fin_store:
+            sections.append("bateria_fin")
+        if bat_active and has_bat_model and "bateria_soc" in (sw_bat_soc or []):
+            sections.append("bateria_soc")
         if not sections:
             return no_update
         tag    = run_tag or "run"
