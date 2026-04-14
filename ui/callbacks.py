@@ -274,6 +274,40 @@ def crear_excel(payload: dict, run_tag: str, sections: list[str], fin_store: dic
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         wb = writer.book
 
+        # --- Information sheet (always first) ---
+        _SHEET_INFO = {
+            "comparativa": ("Comparison",          "Model comparison: cost, self-consumption, import/export ratios and energy KPIs for each optimised allocation model."),
+            "series":      ("Time Series",         "Hourly time series: PV generation, demand, prices, self-consumption, grid import/export and cost for each model and timestamp."),
+            "costes":      ("Cost per User",       "Individual user costs: total cost breakdown per user for each optimised model."),
+            "alpha":       ("Alpha Coeff.",        "Sharing coefficients: mean allocation coefficient \u03b1 per user and model (solar generation periods only)."),
+            "bateria_fin": ("Battery - Financial", "Battery financial analysis: CAPEX, NPV, IRR, payback period and annual cash flow."),
+            "bateria_soc": ("Battery - SOC",       "Battery state of charge: hourly SOC profile of the community battery throughout the optimisation horizon."),
+        }
+        ws_info = wb.create_sheet("Information")
+        _ic1 = ws_info.cell(1, 1, "CEC Optimizer \u2014 Exported File Guide")
+        _ic1.font = Font(bold=True, size=13, color="014593")
+        _ic2 = ws_info.cell(2, 1, f"Run: {run_tag}")
+        _ic2.font = Font(size=9, color="6B7280", italic=True)
+        _ic3 = ws_info.cell(3, 1, "This file contains the following sheets:")
+        _ic3.font = Font(size=10, color="374151")
+        _r_info = 5
+        _ih1 = ws_info.cell(_r_info, 1, "Sheet")
+        _ih1.fill = HDR_FILL; _ih1.font = HDR_FONT; _ih1.alignment = CENTER
+        _ih2 = ws_info.cell(_r_info, 2, "Description")
+        _ih2.fill = HDR_FILL; _ih2.font = HDR_FONT; _ih2.alignment = CENTER
+        _r_info += 1
+        for _sec in sections:
+            if _sec in _SHEET_INFO:
+                _sn, _sd = _SHEET_INFO[_sec]
+                _c1 = ws_info.cell(_r_info, 1, _sn)
+                _c1.font = Font(bold=True, size=10); _c1.alignment = LEFT; _c1.border = THIN_BORDER
+                _c2 = ws_info.cell(_r_info, 2, _sd)
+                _c2.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+                _c2.border = THIN_BORDER
+                _r_info += 1
+        ws_info.column_dimensions["A"].width = 24
+        ws_info.column_dimensions["B"].width = 72
+
         # Column rename maps for English export
         _COL_RENAME = {
             "Modelo":             "Model",
@@ -843,7 +877,8 @@ def register_callbacks(app, cfg):
         last_ts       = pd.DataFrame()
         first_dm      = dynamic_modes_list[0] if dynamic_modes_list else "hour"
         session_id    = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")[:23]
-        run_cache     = {}  # (exante_updates, dynamic_mode) -> (summary, ts, run_tag, base_state)
+        run_cache     = {}  # (exante_updates, dynamic_mode, has_bat) -> (summary, ts, run_tag)
+        base_cache_store = {}  # (exante_updates, dynamic_mode) -> base_cache from optimizar
 
         def _cached_run(u, dm, label_for_err, bat_ov=None):
             key = (u, dm, bool(bat_ov))
@@ -852,15 +887,19 @@ def register_callbacks(app, cfg):
             ov = dict(overrides_base, exante_updates_per_year=u, dynamic_block_mode=dm)
             if bat_ov:
                 ov.update(bat_ov)
+            # Reuse base results when running battery variant
+            bc = base_cache_store.get((u, dm)) if bat_ov else None
             try:
-                results, run_tag, _ = run_pipeline(
+                results, run_tag, _, out_base_cache = run_pipeline(
                     cfg, mode=mode, upload_contents=upload_contents, manual={}, overrides=ov,
-                    run_id=session_id,
+                    run_id=session_id, base_cache=bc,
                 )
             except Exception as e:
                 return None, _err(f"Error en {label_for_err}: {e}")
             s, t = extraer_resultados(results)
             run_cache[key] = (s, t, run_tag)
+            if not bat_ov:
+                base_cache_store[(u, dm)] = out_base_cache
             return run_cache[key], None
 
         for u, ex_label in exante_defs:
@@ -1277,7 +1316,18 @@ def register_callbacks(app, cfg):
                 "borderLeft": ("3px solid #18BC9C" if mn == best_model else "3px solid transparent"),
             }))
 
-        ranking_display = html.Div(rank_items)
+        ranking_display = html.Div([
+            *rank_items,
+            html.P(
+                "Los modelos comparados requieren distintos niveles de inversión, "
+                "por lo que los resultados en coste no son estrictamente comparables en igualdad de condiciones. "
+                "Algunos modelos pueden parecer mejores simplemente porque implican una mayor inversión; "
+                "el ranking debe interpretarse teniendo en cuenta ese contexto económico.",
+                style={"fontStyle": "italic", "fontSize": "11px",
+                       "color": "var(--text-muted)", "marginTop": "14px",
+                       "marginBottom": "0", "lineHeight": "1.5"},
+            ),
+        ])
 
         alpha_options = [{"label": m["Modelo"], "value": m["Modelo"]} for m in data["models"]]
         alpha_default = alpha_options[0]["value"] if alpha_options else None
@@ -1745,6 +1795,120 @@ def register_callbacks(app, cfg):
                      style={"fontSize": "10px", "color": "#94a3b8", "marginBottom": "10px"}),
             html.Div(table, style={"overflowX": "auto"}),
         ])
+
+    @app.callback(
+        Output("alpha-daterange-model", "options"),
+        Output("alpha-daterange-model", "value"),
+        Output("alpha-daterange-start", "value"),
+        Output("alpha-daterange-end",   "value"),
+        Input("results-store", "data"),
+    )
+    def update_alpha_daterange_options(data):
+        if not data or "models" not in data:
+            return [], None, None, None
+        opts = [{"label": m["Modelo"], "value": m["Modelo"]} for m in data["models"]]
+        default = opts[0]["value"] if opts else None
+        # deduce date range from any available series
+        t_min = t_max = None
+        for s in (data.get("series") or {}).values():
+            rows = (s or {}).get("rows") or []
+            if rows:
+                df_s = pd.DataFrame(rows)
+                tcol = col_tiempo(df_s)
+                if tcol:
+                    times = pd.to_datetime(df_s[tcol], errors="coerce").dropna()
+                    if not times.empty:
+                        lo, hi = times.min(), times.max()
+                        t_min = lo if t_min is None else min(t_min, lo)
+                        t_max = hi if t_max is None else max(t_max, hi)
+            break
+        start_str = t_min.strftime("%Y-%m-%d") if t_min else None
+        end_str   = t_max.strftime("%Y-%m-%d") if t_max else None
+        return opts, default, start_str, end_str
+
+    @app.callback(
+        Output("fig-alpha-daterange", "figure"),
+        Input("alpha-daterange-model", "value"),
+        Input("alpha-daterange-start", "value"),
+        Input("alpha-daterange-end",   "value"),
+        Input("results-store", "data"),
+    )
+    def update_alpha_daterange(model_label, start_str, end_str, data):
+        if not model_label or not data or "series" not in data:
+            return grafico_vacio("Selecciona modelo y rango de fechas.")
+
+        series = data.get("series", {}) or {}
+        ts = get_serie(series, model_label)
+        if ts.empty:
+            return grafico_vacio("No hay series disponibles para este modelo.")
+
+        tcol = col_tiempo(ts)
+        if not tcol:
+            return grafico_vacio("No se encontró columna temporal.")
+
+        ts = ts.copy()
+        ts[tcol] = pd.to_datetime(ts[tcol], errors="coerce")
+        ts = ts.dropna(subset=[tcol]).sort_values(tcol).reset_index(drop=True)
+
+        if start_str:
+            ts = ts[ts[tcol] >= pd.Timestamp(start_str)]
+        if end_str:
+            ts = ts[ts[tcol] <= pd.Timestamp(end_str) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)]
+        if ts.empty:
+            return grafico_vacio("No hay datos en el rango de fechas seleccionado.")
+
+        model_row = next((m for m in data["models"] if m["Modelo"] == model_label), None)
+        tipo      = (model_row or {}).get("Tipo", "ex_ante")
+        prefix    = ("alpha_ex_" if tipo == "ex_ante"
+                     else "alpha_fx_" if tipo == "fijo"
+                     else "alpha_prop_")
+        alpha_cols = sorted([c for c in ts.columns if c.startswith(prefix)])
+        if not alpha_cols:
+            return grafico_vacio("No se encontraron columnas de coeficiente α para este modelo.")
+
+        users_display = []
+        for m in (data.get("models") or []):
+            if m.get("Modelo") == model_label:
+                users_display = m.get("users_display") or []
+                break
+        if not users_display:
+            users_display = [f"Usuario {i+1}" for i in range(len(alpha_cols))]
+
+        # Resample to daily mean to keep the chart readable
+        ts = ts.set_index(tcol)
+        fig = go.Figure()
+        for i, col in enumerate(alpha_cols):
+            label = users_display[i] if i < len(users_display) else f"U{i+1}"
+            color = _USER_PALETTE[i % len(_USER_PALETTE)]
+            serie = pd.to_numeric(ts[col], errors="coerce").dropna()
+            serie_daily = serie.resample("D").mean().dropna()
+            if serie_daily.empty:
+                continue
+            fig.add_trace(go.Scatter(
+                x=serie_daily.index,
+                y=serie_daily.values,
+                mode="lines",
+                name=label,
+                line=dict(width=2, color=color),
+                hovertemplate=f"<b>{label}</b><br>%{{x|%Y-%m-%d}}<br>\u03b1 = %{{y:.4f}}<extra></extra>",
+            ))
+
+        fig.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=8, r=8, t=8, b=8),
+            font=dict(size=11),
+            hovermode="x unified",
+            yaxis=dict(rangemode="tozero", tickformat=".3f",
+                       gridcolor="rgba(0,0,0,0.05)", zeroline=False,
+                       title=dict(text="\u03b1", font=dict(size=11))),
+            xaxis=dict(tickfont=dict(size=9), gridcolor="rgba(0,0,0,0)"),
+            legend=dict(orientation="h", x=0, y=-0.22, font=dict(size=11),
+                        bgcolor="rgba(0,0,0,0)"),
+            hoverlabel=dict(bgcolor="#1e293b", bordercolor="#1e293b",
+                            font=dict(color="#f8fafc", size=12)),
+        )
+        return fig
 
     @app.callback(
         Output("explorer-stats-row",      "children"),

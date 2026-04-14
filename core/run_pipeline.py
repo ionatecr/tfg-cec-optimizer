@@ -81,6 +81,7 @@ def run_pipeline(
     manual: dict | None = None,
     overrides: dict | None = None,
     run_id: str | None = None,
+    base_cache: dict | None = None,
 ) -> tuple:
     from datetime import datetime
     overrides = overrides or {}
@@ -103,11 +104,6 @@ def run_pipeline(
     exante_updates_per_year = overrides.get("exante_updates_per_year")
 
     logger.info(f"RUN {run_tag}")
-    logger.info(f"[1/7] CARGA DE DATOS")
-    logger.info(
-        f"  [1.1] modo={mode} | solver={solver_name} | tariff={tariff_mode} | "
-        f"dyn_mode={dynamic_block_mode} | ex_updates={exante_updates_per_year}"
-    )
 
     bat_cfg = None
     if overrides.get("battery_enabled"):
@@ -119,39 +115,55 @@ def run_pipeline(
             efficiency_discharge=float(overrides.get("battery_eta_d", 0.95)),
             initial_soc_fraction=float(overrides.get("battery_soc_init", cfg.battery.initial_soc_fraction)),
         )
-        logger.info(
-            f"  [1.4] batería habilitada: cap={bat_cfg.capacity_kwh} kWh | "
-            f"P={bat_cfg.power_kw} kW | η_c={bat_cfg.efficiency_charge} | η_d={bat_cfg.efficiency_discharge}"
-        )
 
-    if mode == "default":
-        df_c, df_pv, df_buy, df_sell = cargar_datos_defecto(cfg, logger)
-    elif mode == "csv":
-        df_c  = parse_upload(upload_contents["cons"])
-        df_pv = parse_upload(upload_contents["pv"])
-        logger.info(f"  [1.2] uploads: cons={df_c.shape[0]} filas | pv={df_pv.shape[0]} filas")
-        need_buy_file  = (tariff_mode == "indexed") and (not manual_buy_enabled)
-        need_sell_file = (tariff_mode == "indexed") and (not manual_sell_enabled)
-        if tariff_mode == "fixed":
-            df_buy  = precio_fijo_df(df_c, "p_buy",  p_buy_manual)
-            df_sell = precio_fijo_df(df_c, "p_sell", p_sell_manual)
-            logger.info(f"  [1.3] precios fijos: p_buy={p_buy_manual} €/kWh | p_sell={p_sell_manual} €/kWh")
-        else:
-            if need_buy_file and not upload_contents.get("buy"):
-                raise ValueError("Falta CSV de precio compra (indexada) o activa Manual compra.")
-            if need_sell_file and not upload_contents.get("sell"):
-                raise ValueError("Falta CSV de precio venta (indexada) o activa Manual venta.")
-            df_buy  = parse_upload(upload_contents["buy"])  if upload_contents.get("buy")  else precio_fijo_df(df_c, "p_buy",  p_buy_manual)
-            df_sell = parse_upload(upload_contents["sell"]) if upload_contents.get("sell") else precio_fijo_df(df_c, "p_sell", p_sell_manual)
-            if manual_buy_enabled:
-                df_buy  = precio_fijo_df(df_c, "p_buy",  p_buy_manual)
-            if manual_sell_enabled:
-                df_sell = precio_fijo_df(df_c, "p_sell", p_sell_manual)
-            buy_src  = f"manual {p_buy_manual} €/kWh"  if manual_buy_enabled  else "CSV"
-            sell_src = f"manual {p_sell_manual} €/kWh" if manual_sell_enabled else "CSV"
-            logger.info(f"  [1.3] precios: buy={buy_src} | sell={sell_src}")
+    if base_cache is not None:
+        logger.info("[1/7] CARGA DE DATOS")
+        if bat_cfg:
+            logger.info(
+                f"  [1.4] batería habilitada: cap={bat_cfg.capacity_kwh} kWh | "
+                f"P={bat_cfg.power_kw} kW | η_c={bat_cfg.efficiency_charge} | η_d={bat_cfg.efficiency_discharge}"
+            )
+        df_c = df_pv = df_buy = df_sell = None  # not needed, data is in base_cache
     else:
-        raise ValueError("mode debe ser 'csv' o 'default'.")
+        logger.info("[1/7] CARGA DE DATOS")
+        logger.info(
+            f"  [1.1] modo={mode} | solver={solver_name} | tariff={tariff_mode} | "
+            f"dyn_mode={dynamic_block_mode} | ex_updates={exante_updates_per_year}"
+        )
+        if bat_cfg:
+            logger.info(
+                f"  [1.4] batería habilitada: cap={bat_cfg.capacity_kwh} kWh | "
+                f"P={bat_cfg.power_kw} kW | η_c={bat_cfg.efficiency_charge} | η_d={bat_cfg.efficiency_discharge}"
+            )
+
+        if mode == "default":
+            df_c, df_pv, df_buy, df_sell = cargar_datos_defecto(cfg, logger)
+        elif mode == "csv":
+            df_c  = parse_upload(upload_contents["cons"])
+            df_pv = parse_upload(upload_contents["pv"])
+            logger.info(f"  [1.2] uploads: cons={df_c.shape[0]} filas | pv={df_pv.shape[0]} filas")
+            need_buy_file  = (tariff_mode == "indexed") and (not manual_buy_enabled)
+            need_sell_file = (tariff_mode == "indexed") and (not manual_sell_enabled)
+            if tariff_mode == "fixed":
+                df_buy  = precio_fijo_df(df_c, "p_buy",  p_buy_manual)
+                df_sell = precio_fijo_df(df_c, "p_sell", p_sell_manual)
+                logger.info(f"  [1.3] precios fijos: p_buy={p_buy_manual} €/kWh | p_sell={p_sell_manual} €/kWh")
+            else:
+                if need_buy_file and not upload_contents.get("buy"):
+                    raise ValueError("Falta CSV de precio compra (indexada) o activa Manual compra.")
+                if need_sell_file and not upload_contents.get("sell"):
+                    raise ValueError("Falta CSV de precio venta (indexada) o activa Manual venta.")
+                df_buy  = parse_upload(upload_contents["buy"])  if upload_contents.get("buy")  else precio_fijo_df(df_c, "p_buy",  p_buy_manual)
+                df_sell = parse_upload(upload_contents["sell"]) if upload_contents.get("sell") else precio_fijo_df(df_c, "p_sell", p_sell_manual)
+                if manual_buy_enabled:
+                    df_buy  = precio_fijo_df(df_c, "p_buy",  p_buy_manual)
+                if manual_sell_enabled:
+                    df_sell = precio_fijo_df(df_c, "p_sell", p_sell_manual)
+                buy_src  = f"manual {p_buy_manual} €/kWh"  if manual_buy_enabled  else "CSV"
+                sell_src = f"manual {p_sell_manual} €/kWh" if manual_sell_enabled else "CSV"
+                logger.info(f"  [1.3] precios: buy={buy_src} | sell={sell_src}")
+        else:
+            raise ValueError("mode debe ser 'csv' o 'default'.")
 
     old_updates = cfg.ex_ante.updates_per_year
     try:
@@ -165,10 +177,11 @@ def run_pipeline(
             solver_name=solver_name,
             dynamic_block_mode=dynamic_block_mode,
             battery_cfg=bat_cfg,
+            base_cache=base_cache,
         )
     finally:
         cfg.ex_ante.updates_per_year = old_updates
 
     logger.info(f"RUN OK | {run_tag}")
-    summary, df_ts = results
-    return (summary, df_ts), run_tag, None
+    summary, df_ts, out_base_cache = results
+    return (summary, df_ts), run_tag, None, out_base_cache

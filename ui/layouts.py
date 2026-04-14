@@ -411,6 +411,56 @@ def pagina_usuarios():
                 ]),
                 className="chart-card mt-3",
             ),
+
+            html.Div("Evolución de coeficientes por rango de fechas", className="section-title"),
+            dbc.Card(
+                dbc.CardBody([
+                    dbc.Row([
+                        dbc.Col(
+                            html.Div(
+                                "Evolución de los coeficientes de reparto en el tiempo",
+                                className="chart-title",
+                            ),
+                            md=12,
+                        ),
+                    ], className="mb-2"),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Div("Modelo", className="param-label"),
+                            dcc.Dropdown(
+                                id="alpha-daterange-model",
+                                placeholder="Selecciona modelo…",
+                                clearable=False,
+                                style={"fontSize": "12px"},
+                            ),
+                        ], md=4),
+                        dbc.Col([
+                            html.Div("Fecha inicio", className="param-label"),
+                            dbc.Input(
+                                id="alpha-daterange-start",
+                                type="date",
+                                className="param-input",
+                                style={"width": "100%"},
+                            ),
+                        ], md=4),
+                        dbc.Col([
+                            html.Div("Fecha fin", className="param-label"),
+                            dbc.Input(
+                                id="alpha-daterange-end",
+                                type="date",
+                                className="param-input",
+                                style={"width": "100%"},
+                            ),
+                        ], md=4),
+                    ], className="g-2 mb-2"),
+                    dcc.Graph(
+                        id="fig-alpha-daterange",
+                        config={"displayModeBar": False},
+                        style={"height": "300px"},
+                    ),
+                ]),
+                className="chart-card mt-3",
+            ),
         ],
         id="page-usuarios",
         className="inner-page",

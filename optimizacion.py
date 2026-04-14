@@ -3,7 +3,7 @@ import sys
 import pandas as pd
 from pyomo.environ import (
     ConcreteModel, RangeSet, Param, Var, Constraint, Objective, minimize,
-    NonNegativeReals, SolverFactory, value,
+    NonNegativeReals, Binary, SolverFactory, value,
 )
 
 from model.validation import validate_prepared_inputs
@@ -163,18 +163,13 @@ def corregir_alpha(alpha_vals, b_of_t, T, U, g, cons):
     return n_deg
 
 
-def resolver_lp(df, users, b_of_t, B, solver, tee, logger, step_num=5):
+def _preparar_datos(df, users, b_of_t):
     T = len(df)
     U = len(users)
-    s = step_num
-
-    logger.info(f"  [{s}.1] dimensiones: T={T} | U={U} | B={B} bloques | alpha={U*B} vars | self_v={U*T} vars")
-
     cons = {}
     for u in range(U):
         for t in range(T):
             cons[(u + 1, t + 1)] = float(df.loc[t, users[u]])
-
     g = {}
     pbuy = {}
     psell = {}
@@ -184,6 +179,20 @@ def resolver_lp(df, users, b_of_t, B, solver, tee, logger, step_num=5):
         pbuy[t + 1]    = float(df.loc[t, "p_buy"])
         psell[t + 1]   = float(df.loc[t, "p_sell"])
         b_param[t + 1] = int(b_of_t[t + 1])
+    return cons, g, pbuy, psell, b_param
+
+
+def resolver_lp(df, users, b_of_t, B, solver, tee, logger, step_num=5, datos=None):
+    T = len(df)
+    U = len(users)
+    s = step_num
+
+    logger.info(f"  [{s}.1] dimensiones: T={T} | U={U} | B={B} bloques | alpha={U*B} vars | self_v={U*T} vars")
+
+    if datos is not None:
+        cons, g, pbuy, psell, b_param = datos
+    else:
+        cons, g, pbuy, psell, b_param = _preparar_datos(df, users, b_of_t)
 
     g_total  = sum(g.values())
     d_total  = sum(cons.values())
@@ -329,6 +338,7 @@ def resolver_lp_bateria(
     tee,
     logger,
     step_num=7,
+    datos=None,
 ):
     T = len(df)
     U = len(users)
@@ -343,26 +353,10 @@ def resolver_lp_bateria(
         f"vars_bat={3 * T} (charge+discharge+SOC)"
     )
 
-    cons = {}
-    for u in range(U):
-        for t in range(T):
-            cons[(u + 1, t + 1)] = float(df.loc[t, users[u]])
-
-    g = {}
-    for t in range(T):
-        g[t + 1] = float(df.loc[t, "G"])
-
-    pbuy = {}
-    for t in range(T):
-        pbuy[t + 1] = float(df.loc[t, "p_buy"])
-
-    psell = {}
-    for t in range(T):
-        psell[t + 1] = float(df.loc[t, "p_sell"])
-
-    b_param = {}
-    for t in range(T):
-        b_param[t + 1] = int(b_of_t[t + 1])
+    if datos is not None:
+        cons, g, pbuy, psell, b_param = datos
+    else:
+        cons, g, pbuy, psell, b_param = _preparar_datos(df, users, b_of_t)
 
     m = ConcreteModel()
     m.U = RangeSet(1, U)
@@ -381,6 +375,13 @@ def resolver_lp_bateria(
     m.charge    = Var(m.T, domain=NonNegativeReals, bounds=(0.0, bat_pow))
     m.discharge = Var(m.T, domain=NonNegativeReals, bounds=(0.0, bat_pow))
     m.SOC       = Var(m.T, domain=NonNegativeReals, bounds=(0.0, bat_cap))
+
+    # Binary variables to prevent simultaneous charge and discharge (MILP)
+    m.charge_bin    = Var(m.T, domain=Binary)
+    m.discharge_bin = Var(m.T, domain=Binary)
+    m.no_simul      = Constraint(m.T, rule=lambda m, t: m.charge_bin[t] + m.discharge_bin[t] <= 1)
+    m.charge_ub_bin = Constraint(m.T, rule=lambda m, t: m.charge[t]    <= bat_pow * m.charge_bin[t])
+    m.discharge_ub_bin = Constraint(m.T, rule=lambda m, t: m.discharge[t] <= bat_pow * m.discharge_bin[t])
 
     m.sum_alpha = Constraint(
         m.B, rule=lambda m, b: sum(m.alpha[u, b] for u in m.U) == 1.0
@@ -582,6 +583,7 @@ def optimizar(
     solver_name: str | None = None,
     dynamic_block_mode: str | None = None,
     battery_cfg: BatteryConfig | None = None,
+    base_cache: dict | None = None,
 ):
     cfg = config
     solver_name        = solver_name        or cfg.optimization.solver
@@ -590,54 +592,82 @@ def optimizar(
 
     run_battery = battery_cfg is not None and battery_cfg.enabled
 
-    logger.info("[2/7] PREPROCESO")
-    prepared = prepare_inputs(df_c, df_pv, df_buy, df_sell)
-    df       = prepared.df.copy()
-    users    = prepared.users
+    if base_cache is not None:
+        df          = base_cache["df"]
+        users       = base_cache["users"]
+        T, U        = base_cache["T"], base_cache["U"]
+        b_of_t_ex   = base_cache["b_of_t_ex"]
+        B_ex        = base_cache["B_ex"]
+        b_of_t_dyn  = base_cache["b_of_t_dyn"]
+        B_dyn       = base_cache["B_dyn"]
+        solver      = base_cache["solver"]
+        solver_used = base_cache["solver_used"]
+        tee         = base_cache["tee"]
+        datos_dyn   = base_cache["datos_dyn"]
 
-    logger.info("[3/7] VALIDACIÓN")
-    issues = validate_prepared_inputs(prepared, strict=cfg.validation.strict)
-    errors = [i for i in issues if i.level == "ERROR"]
-    if errors:
-        for e in errors:
-            logger.error(f"  ERROR [{e.code}] {e.message}")
-        raise ValueError("Validation failed:\n" + "\n".join(f"[{e.code}] {e.message}" for e in errors))
+        (self_ex_ts, imp_ex_ts, exp_ex_ts, cost_ex_ts,
+         alpha_ex, pu_self_ex, pu_imp_ex) = base_cache["ex_ante"]
 
-    df = df.sort_values("Time").reset_index(drop=True)
-    df["D_total"] = df[users].sum(axis=1)
-    df["G"]       = df["pv_kWh"]
-    T = len(df)
-    U = len(users)
+        (self_dyn_ts, imp_dyn_ts, exp_dyn_ts, cost_dyn_ts,
+         alpha_dyn, pu_self_dyn, pu_imp_dyn) = base_cache["dynamic"]
 
-    if T == 0 or U == 0:
-        raise ValueError("Datos vacíos tras preprocess.")
+        (self_fx_ts, imp_fx_ts, exp_fx_ts, cost_fx_ts,
+         alpha_fx, pu_self_fx, pu_imp_fx,
+         p_buy_fx, p_sell_fx) = base_cache["fixed"]
+    else:
+        logger.info("[2/7] PREPROCESO")
+        prepared = prepare_inputs(df_c, df_pv, df_buy, df_sell)
+        df       = prepared.df.copy()
+        users    = prepared.users
 
-    logger.info("[4/7] CONFIGURACIÓN")
-    solver, solver_used = elegir_solver(solver_name, cfg.optimization.solver_fallbacks, logger)
-    tee = bool(cfg.optimization.tee)
+        logger.info("[3/7] VALIDACIÓN")
+        issues = validate_prepared_inputs(prepared, strict=cfg.validation.strict)
+        errors = [i for i in issues if i.level == "ERROR"]
+        if errors:
+            for e in errors:
+                logger.error(f"  ERROR [{e.code}] {e.message}")
+            raise ValueError("Validation failed:\n" + "\n".join(f"[{e.code}] {e.message}" for e in errors))
 
-    b_list_ex, b_of_t_ex   = bloques_ex_ante(df["Time"], updates_per_year)
-    b_list_dyn, b_of_t_dyn = calcular_bloques(df["Time"], str(dynamic_block_mode))
-    B_ex  = len(b_list_ex)
-    B_dyn = len(b_list_dyn)
+        df = df.sort_values("Time").reset_index(drop=True)
+        df["D_total"] = df[users].sum(axis=1)
+        df["G"]       = df["pv_kWh"]
+        T = len(df)
+        U = len(users)
 
-    logger.info(f"  [4.1] datos: T={T} | U={U} | D_total={df['D_total'].sum():.1f} kWh | G_total={df['G'].sum():.1f} kWh")
-    logger.info(f"  [4.2] solver: '{solver_used}' | tee={tee}")
-    logger.info(f"  [4.3] ex ante: {B_ex} bloques (updates_per_year={updates_per_year})")
-    logger.info(f"  [4.4] dinámico: {B_dyn} bloques (mode='{dynamic_block_mode}')")
+        if T == 0 or U == 0:
+            raise ValueError("Datos vacíos tras preprocess.")
 
-    logger.info("[5/7] OPTIMIZACIÓN EX ANTE")
-    (self_ex_ts, imp_ex_ts, exp_ex_ts, cost_ex_ts,
-     alpha_ex, pu_self_ex, pu_imp_ex) = resolver_lp(df, users, b_of_t_ex, B_ex, solver, tee, logger, step_num=5)
+        logger.info("[4/7] CONFIGURACIÓN")
+        solver, solver_used = elegir_solver(solver_name, cfg.optimization.solver_fallbacks, logger)
+        tee = bool(cfg.optimization.tee)
 
-    logger.info("[6/7] OPTIMIZACIÓN DINÁMICA")
-    (self_dyn_ts, imp_dyn_ts, exp_dyn_ts, cost_dyn_ts,
-     alpha_dyn, pu_self_dyn, pu_imp_dyn) = resolver_lp(df, users, b_of_t_dyn, B_dyn, solver, tee, logger, step_num=6)
+        b_list_ex, b_of_t_ex   = bloques_ex_ante(df["Time"], updates_per_year)
+        b_list_dyn, b_of_t_dyn = calcular_bloques(df["Time"], str(dynamic_block_mode))
+        B_ex  = len(b_list_ex)
+        B_dyn = len(b_list_dyn)
 
-    logger.info("[6.5/7] REPARTO FIJO PROPORCIONAL (baseline)")
-    (self_fx_ts, imp_fx_ts, exp_fx_ts, cost_fx_ts,
-     alpha_fx, pu_self_fx, pu_imp_fx,
-     p_buy_fx, p_sell_fx) = reparto_fijo(df, users, logger)
+        logger.info(f"  [4.1] datos: T={T} | U={U} | D_total={df['D_total'].sum():.1f} kWh | G_total={df['G'].sum():.1f} kWh")
+        logger.info(f"  [4.2] solver: '{solver_used}' | tee={tee}")
+        logger.info(f"  [4.3] ex ante: {B_ex} bloques (updates_per_year={updates_per_year})")
+        logger.info(f"  [4.4] dinámico: {B_dyn} bloques (mode='{dynamic_block_mode}')")
+
+        # --- Pre-compute data dicts (shared by all solvers) ---
+        datos_ex  = _preparar_datos(df, users, b_of_t_ex)
+        datos_dyn = _preparar_datos(df, users, b_of_t_dyn) if b_of_t_dyn != b_of_t_ex else datos_ex
+
+        logger.info("[5/7] OPTIMIZACIÓN EX ANTE")
+        (self_ex_ts, imp_ex_ts, exp_ex_ts, cost_ex_ts,
+         alpha_ex, pu_self_ex, pu_imp_ex) = resolver_lp(df, users, b_of_t_ex, B_ex, solver, tee, logger, step_num=5, datos=datos_ex)
+
+        logger.info("[6/7] OPTIMIZACIÓN DINÁMICA")
+        (self_dyn_ts, imp_dyn_ts, exp_dyn_ts, cost_dyn_ts,
+         alpha_dyn, pu_self_dyn, pu_imp_dyn) = resolver_lp(df, users, b_of_t_dyn, B_dyn, solver, tee, logger, step_num=6, datos=datos_dyn)
+
+        logger.info("[6.5/7] REPARTO FIJO PROPORCIONAL (baseline)")
+        (self_fx_ts, imp_fx_ts, exp_fx_ts, cost_fx_ts,
+         alpha_fx, pu_self_fx, pu_imp_fx,
+         p_buy_fx, p_sell_fx) = reparto_fijo(df, users, logger)
+
     if run_battery:
         bat_cap  = float(battery_cfg.capacity_kwh)
         bat_pow  = float(battery_cfg.power_kw)
@@ -650,7 +680,7 @@ def optimizar(
          alpha_bat, pu_self_bat, pu_imp_bat) = resolver_lp_bateria(
             df, users, b_of_t_dyn, B_dyn,
             bat_cap, bat_pow, eta_c, eta_d, soc_init,
-            solver, tee, logger, step_num=7,
+            solver, tee, logger, step_num=7, datos=datos_dyn,
         )
     else:
         self_bat_ts = imp_bat_ts = exp_bat_ts = cost_bat_ts = []
@@ -866,4 +896,21 @@ def optimizar(
 
     df_ts = pd.concat([df_ts, pd.DataFrame(extra_cols, index=df_ts.index)], axis=1)
 
-    return summary, df_ts
+    out_base_cache = {
+        # Infrastructure (steps 2-4)
+        "df": df, "users": users, "T": T, "U": U,
+        "b_of_t_ex": b_of_t_ex, "B_ex": B_ex,
+        "b_of_t_dyn": b_of_t_dyn, "B_dyn": B_dyn,
+        "solver": solver, "solver_used": solver_used, "tee": tee,
+        "datos_dyn": datos_dyn,
+        # Solver results (steps 5, 6, 6.5)
+        "ex_ante": (self_ex_ts, imp_ex_ts, exp_ex_ts, cost_ex_ts,
+                    alpha_ex, pu_self_ex, pu_imp_ex),
+        "dynamic": (self_dyn_ts, imp_dyn_ts, exp_dyn_ts, cost_dyn_ts,
+                    alpha_dyn, pu_self_dyn, pu_imp_dyn),
+        "fixed":   (self_fx_ts, imp_fx_ts, exp_fx_ts, cost_fx_ts,
+                    alpha_fx, pu_self_fx, pu_imp_fx,
+                    p_buy_fx, p_sell_fx),
+    }
+
+    return summary, df_ts, out_base_cache
