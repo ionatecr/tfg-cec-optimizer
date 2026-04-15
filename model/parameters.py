@@ -39,6 +39,8 @@ class BatteryConfig:
     efficiency_charge: float
     efficiency_discharge: float
     initial_soc_fraction: float
+    replacement_cost_eur: float
+    lifecycle_cycles: int
 
     def validate(self):
         if self.capacity_kwh <= 0:
@@ -51,6 +53,10 @@ class BatteryConfig:
             raise ValueError("battery.efficiency_discharge debe estar en el rango (0, 1]")
         if not (0.0 <= self.initial_soc_fraction <= 1.0):
             raise ValueError("battery.initial_soc_fraction debe estar en el rango [0, 1]")
+        if self.replacement_cost_eur < 0:
+            raise ValueError("battery.replacement_cost_eur no puede ser negativo")
+        if self.lifecycle_cycles <= 0:
+            raise ValueError("battery.lifecycle_cycles debe ser mayor que 0")
 
 
 @dataclass
@@ -216,6 +222,8 @@ def load_config(path="parameters.yaml"):
             efficiency_charge=float(bat.get("efficiency_charge", 0.95)),
             efficiency_discharge=float(bat.get("efficiency_discharge", 0.95)),
             initial_soc_fraction=float(bat.get("initial_soc_fraction", 0.0)),
+            replacement_cost_eur=float(bat.get("replacement_cost_eur", 500.0)),
+            lifecycle_cycles=int(bat.get("lifecycle_cycles", 4000)),
         ),
         io=IoConfig(
             csv=CsvConfig(

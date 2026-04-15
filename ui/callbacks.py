@@ -788,6 +788,8 @@ def register_callbacks(app, cfg):
         State("bat-power",           "value"),
         State("bat-eta-c",           "value"),
         State("bat-eta-d",           "value"),
+        State("bat-replacement-cost","value"),
+        State("bat-lifecycle-cycles","value"),
         prevent_initial_call=True,
     )
     def run(
@@ -798,6 +800,7 @@ def register_callbacks(app, cfg):
         cons, pv, buy, sell,
         solver_name, exante_mode_list, dynamic_modes_list,
         battery_enabled, bat_capacity, bat_power, bat_eta_c, bat_eta_d,
+        bat_replacement_cost, bat_lifecycle_cycles,
     ):
         triggered = ctx.triggered_id
         use_sample = (triggered == "sample-data-btn")
@@ -971,12 +974,14 @@ def register_callbacks(app, cfg):
             u_bat     = 4 if "rd" in exante_mode_list else 0
             bat_label = "Dinámico con batería"
             bat_ov    = {
-                "battery_enabled":      True,
-                "battery_capacity_kwh": float(bat_capacity or 10.0),
-                "battery_power_kw":     float(bat_power or 5.0),
-                "battery_eta_c":        float((bat_eta_c or 95)) / 100.0,
-                "battery_eta_d":        float((bat_eta_d or 95)) / 100.0,
-                "battery_soc_init":     cfg.battery.initial_soc_fraction,
+                "battery_enabled":            True,
+                "battery_capacity_kwh":       float(bat_capacity or 10.0),
+                "battery_power_kw":           float(bat_power or 5.0),
+                "battery_eta_c":              float((bat_eta_c or 95)) / 100.0,
+                "battery_eta_d":              float((bat_eta_d or 95)) / 100.0,
+                "battery_soc_init":           cfg.battery.initial_soc_fraction,
+                "battery_replacement_cost":   float(bat_replacement_cost or 500.0),
+                "battery_lifecycle_cycles":   int(bat_lifecycle_cycles or 4000),
             }
             result_bat, err_bat = _cached_run(u_bat, bat_dm, bat_label, bat_ov=bat_ov)
             if err_bat:
@@ -1002,6 +1007,8 @@ def register_callbacks(app, cfg):
                     imp_pct_b  = imp_bat / d_tot * 100 if d_tot > 0 else 0
                     exp_pct_b  = exp_bat / g_tot * 100 if g_tot > 0 else 0
                     pu_bat     = coste_por_usuario(summary_bat, "bat") or coste_por_usuario(summary_bat, "prop")
+                    bat_efc_val      = summary_bat.get("bat_efc")
+                    bat_soh_loss_val = summary_bat.get("bat_soh_loss_pct")
                     models.append({
                         "Modelo":               bat_label,
                         "Tipo":                 "bateria",
@@ -1015,6 +1022,9 @@ def register_callbacks(app, cfg):
                         "cost_per_user":        pu_bat,
                         "users_display":        list(pu_bat.keys()),
                         "battery_capacity_kwh": float(bat_capacity or 10.0),
+                        "bat_efc":              bat_efc_val,
+                        "bat_soh_loss_pct":     bat_soh_loss_val,
+                        "bat_lifecycle_cycles": int(bat_lifecycle_cycles or 4000),
                     })
                     if isinstance(ts_bat, pd.DataFrame) and not ts_bat.empty:
                         series[bat_label] = {"columns": list(ts_bat.columns), "rows": ts_bat.to_dict("records")}
@@ -1318,15 +1328,16 @@ def register_callbacks(app, cfg):
 
         ranking_display = html.Div([
             *rank_items,
-            html.P(
-                "Los modelos comparados requieren distintos niveles de inversión, "
-                "por lo que los resultados en coste no son estrictamente comparables en igualdad de condiciones. "
-                "Algunos modelos pueden parecer mejores simplemente porque implican una mayor inversión; "
-                "el ranking debe interpretarse teniendo en cuenta ese contexto económico.",
-                style={"fontStyle": "italic", "fontSize": "11px",
-                       "color": "var(--text-muted)", "marginTop": "14px",
-                       "marginBottom": "0", "lineHeight": "1.5"},
-            ),
+            html.Hr(style={"margin": "14px 0 10px", "borderColor": "var(--border)"}),
+            html.Div([
+                html.I(className="bi bi-info-circle me-2",
+                       style={"color": "var(--text-muted)", "fontSize": "12px"}),
+                html.Span(
+                    "Los modelos comparados requieren distintos niveles de inversión inicial, "
+                    "por lo que los resultados en coste no son estrictamente comparables en igualdad de condiciones.",
+                    style={"fontStyle": "italic"},
+                ),
+            ], style={"fontSize": "11px", "color": "var(--text-muted)", "lineHeight": "1.5"}),
         ])
 
         alpha_options = [{"label": m["Modelo"], "value": m["Modelo"]} for m in data["models"]]
@@ -1498,7 +1509,7 @@ def register_callbacks(app, cfg):
     )
     def update_alpha_chart(model_label, data):
         if not model_label or not data or "series" not in data:
-            return grafico_vacio("Selecciona un modelo para ver los coeficientes α.")
+            return grafico_vacio("Selecciona un modelo para ver los coeficientes alpha.")
 
         series = data.get("series", {}) or {}
         ts = get_serie(series, model_label)
@@ -1520,7 +1531,7 @@ def register_callbacks(app, cfg):
 
         alpha_cols = [c for c in ts.columns if c.startswith(prefix)]
         if not alpha_cols:
-            return grafico_vacio("No se encontraron columnas de coeficientes α en este modelo.")
+            return grafico_vacio("No se encontraron columnas de coeficientes alpha en este modelo.")
 
         models_list = data.get("models", [])
         users_display = []
@@ -1575,7 +1586,7 @@ def register_callbacks(app, cfg):
                     mode="lines",
                     name=label,
                     line=dict(shape="hv", width=2.5, color=color),
-                    hovertemplate=f"<b>{label}</b><br>%{{x}}<br>α = %{{y:.4f}}<extra></extra>",
+                    hovertemplate=f"<b>{label}</b><br>%{{x}}<br>alpha = %{{y:.4f}}<extra></extra>",
                 ))
             fig.update_layout(
                 paper_bgcolor="rgba(0,0,0,0)",
@@ -1585,7 +1596,7 @@ def register_callbacks(app, cfg):
                 hovermode="x unified",
                 yaxis=dict(rangemode="tozero", tickformat=".2f",
                            gridcolor="rgba(0,0,0,0.05)", zeroline=False,
-                           title=dict(text="α", font=dict(size=11))),
+                           title=dict(text="alpha", font=dict(size=11))),
                 xaxis=dict(tickangle=-40 if len(period_labels) > 8 else 0,
                            tickfont=dict(size=9), gridcolor="rgba(0,0,0,0)"),
                 legend=dict(orientation="h", x=0, y=-0.22, font=dict(size=11),
@@ -1636,7 +1647,7 @@ def register_callbacks(app, cfg):
 
                 fig.add_trace(go.Scatter(
                     x=[stat["lo"], stat["hi"]], y=[lbl, lbl],
-                    mode="lines", name="Dispersión (±σ)",
+                    mode="lines", name="Dispersión (±std)",
                     legendgroup="disp", showlegend=first,
                     line=dict(color=f"rgba({r_c},{g_c},{b_c},0.45)", width=4),
                     hoverinfo="skip",
@@ -1680,7 +1691,7 @@ def register_callbacks(app, cfg):
                 font=dict(size=11),
                 xaxis=dict(rangemode="tozero", tickformat=".2f",
                            gridcolor="rgba(0,0,0,0.06)", zeroline=False,
-                           title=dict(text="α", font=dict(size=11))),
+                           title=dict(text="alpha", font=dict(size=11))),
                 yaxis=dict(tickfont=dict(size=11), gridcolor="rgba(0,0,0,0)",
                            autorange="reversed"),
                 legend=dict(orientation="h", x=0, y=-0.18, font=dict(size=11),
@@ -1864,7 +1875,7 @@ def register_callbacks(app, cfg):
                      else "alpha_prop_")
         alpha_cols = sorted([c for c in ts.columns if c.startswith(prefix)])
         if not alpha_cols:
-            return grafico_vacio("No se encontraron columnas de coeficiente α para este modelo.")
+            return grafico_vacio("No se encontraron columnas de coeficiente alpha para este modelo.")
 
         users_display = []
         for m in (data.get("models") or []):
@@ -1950,10 +1961,12 @@ def register_callbacks(app, cfg):
             t_dt_min = ts[tcol].min()
             t_dt_max = ts[tcol].max()
             if t_dt_min.year == t_dt_max.year:
-                t_start = f"{_MESES[t_dt_min.month-1]} – {_MESES[t_dt_max.month-1]} {t_dt_max.year}"
+                if t_dt_min.month == 1 and t_dt_max.month == 12:
+                    t_start = str(t_dt_max.year)
+                else:
+                    t_start = f"{_MESES[t_dt_min.month-1]}–{_MESES[t_dt_max.month-1]} {t_dt_max.year}"
             else:
-                t_start = (f"{_MESES[t_dt_min.month-1]} {t_dt_min.year} – "
-                           f"{_MESES[t_dt_max.month-1]} {t_dt_max.year}")
+                t_start = f"{t_dt_min.year}–{str(t_dt_max.year)[2:]}"
         else:
             t_start = "—"
         dem_col  = primera_col(ts.columns, ["demand_kWh", "D_total"])
@@ -1965,36 +1978,33 @@ def register_callbacks(app, cfg):
         n_users   = len(user_cols)
         pv_coverage_pct = (total_pv / total_dem * 100.0) if total_dem > 1e-12 else 0.0
 
-        _TILE_COLORS = ["#014593", "#18BC9C", "#F39C12", "#9B59B6", "#E74C3C"]
-
-        def stat_tile(icon, label, value, color):
-            return html.Div(
-                [
-                    html.Div(
-                        html.I(className=f"bi {icon}",
-                               style={"fontSize": "18px", "color": color}),
-                        style={
-                            "width": "38px", "height": "38px",
-                            "borderRadius": "10px",
-                            "background": f"color-mix(in srgb, {color} 12%, white)",
-                            "display": "flex", "alignItems": "center",
-                            "justifyContent": "center", "flexShrink": "0",
-                        },
-                    ),
-                    html.Div([
-                        html.Div(label, className="stat-tile-label"),
-                        html.Div(value, className="stat-tile-value"),
-                    ]),
-                ],
-                className="stat-tile",
-                style={"borderTop": f"3px solid {color}"},
+        def stat_tile(label, value, variant):
+            return dbc.Card(
+                dbc.CardBody([
+                    html.Div(label, className="kpi-label"),
+                    html.Div(value, className="kpi-value"),
+                    html.Div("", className="kpi-delta"),
+                ]),
+                className=f"kpi-card {variant}",
             )
 
+        bat_model = next(
+            (m for m in models if m.get("Tipo") == "bateria" and m.get("Coste (€)") is not None),
+            None,
+        )
+        if bat_model and bat_model.get("bat_efc") and bat_model["bat_efc"] > 0:
+            efc_period       = float(bat_model["bat_efc"])
+            lifecycle_cycles = int(bat_model.get("bat_lifecycle_cycles") or 4000)
+            vida_restante_pct = max(0.0, (1 - efc_period / lifecycle_cycles) * 100)
+            fourth_tile = stat_tile("Vida restante bat.", f"{vida_restante_pct:.2f} %", "warning")
+        else:
+            fourth_tile = stat_tile("Usuarios", str(n_users), "warning")
+
         stats_row = [
-            stat_tile("bi-calendar-range",   "Periodo",        t_start,                                    _TILE_COLORS[0]),
-            stat_tile("bi-sun",              "Generación FV",  f"{formato_num(total_pv, 0)} kWh" if total_pv > 0 else "—", _TILE_COLORS[1]),
-            stat_tile("bi-people",           "Usuarios",       str(n_users),                               _TILE_COLORS[2]),
-            stat_tile("bi-lightning-charge", "Demanda total",  f"{formato_num(total_dem, 0)} kWh",             _TILE_COLORS[3]),
+            stat_tile("Periodo",       t_start,                                                             "brand"),
+            stat_tile("Generación FV", f"{formato_num(total_pv, 0)} kWh" if total_pv > 0 else "—",         "success"),
+            fourth_tile,
+            stat_tile("Demanda total", f"{formato_num(total_dem, 0)} kWh",                                  "accent"),
         ]
 
         fig_price = go.Figure()

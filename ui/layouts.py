@@ -382,7 +382,7 @@ def pagina_usuarios():
                     dbc.Row([
                         dbc.Col(
                             html.Div(
-                                "Distribución del coeficiente α por usuario y período",
+                                "Distribución del coeficiente alpha por usuario y período",
                                 className="chart-title",
                             ),
                             md=8,
@@ -787,8 +787,8 @@ def pagina_export():
          "Coste por usuario",
          "Desglose individual: coste ex ante, dinámico y ahorro por usuario"),
         ("alpha",       "bi bi-sliders2",        "#9B59B6",
-         "Coeficientes α de reparto",
-         "Media del coeficiente α por modelo y usuario (solo períodos con FV)"),
+         "Coeficientes alpha de reparto",
+         "Media del coeficiente alpha por modelo y usuario (solo períodos con FV)"),
     ]
 
     _SECTIONS_BAT = [

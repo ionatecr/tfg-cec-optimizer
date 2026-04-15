@@ -114,6 +114,8 @@ def run_pipeline(
             efficiency_charge=float(overrides.get("battery_eta_c", 0.95)),
             efficiency_discharge=float(overrides.get("battery_eta_d", 0.95)),
             initial_soc_fraction=float(overrides.get("battery_soc_init", cfg.battery.initial_soc_fraction)),
+            replacement_cost_eur=float(overrides.get("battery_replacement_cost", cfg.battery.replacement_cost_eur)),
+            lifecycle_cycles=int(overrides.get("battery_lifecycle_cycles", cfg.battery.lifecycle_cycles)),
         )
 
     if base_cache is not None:
@@ -121,7 +123,7 @@ def run_pipeline(
         if bat_cfg:
             logger.info(
                 f"  [1.4] batería habilitada: cap={bat_cfg.capacity_kwh} kWh | "
-                f"P={bat_cfg.power_kw} kW | η_c={bat_cfg.efficiency_charge} | η_d={bat_cfg.efficiency_discharge}"
+                f"P={bat_cfg.power_kw} kW | eff_c={bat_cfg.efficiency_charge} | eff_d={bat_cfg.efficiency_discharge}"
             )
         df_c = df_pv = df_buy = df_sell = None  # not needed, data is in base_cache
     else:
@@ -133,7 +135,7 @@ def run_pipeline(
         if bat_cfg:
             logger.info(
                 f"  [1.4] batería habilitada: cap={bat_cfg.capacity_kwh} kWh | "
-                f"P={bat_cfg.power_kw} kW | η_c={bat_cfg.efficiency_charge} | η_d={bat_cfg.efficiency_discharge}"
+                f"P={bat_cfg.power_kw} kW | eff_c={bat_cfg.efficiency_charge} | eff_d={bat_cfg.efficiency_discharge}"
             )
 
         if mode == "default":

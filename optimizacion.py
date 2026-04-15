@@ -339,6 +339,7 @@ def resolver_lp_bateria(
     logger,
     step_num=7,
     datos=None,
+    c_deg=0.0,
 ):
     T = len(df)
     U = len(users)
@@ -346,7 +347,7 @@ def resolver_lp_bateria(
 
     logger.info(
         f"  [{s}.1] batería: cap={bat_cap:.1f} kWh | P_max={bat_pow:.1f} kW | "
-        f"η_c={eta_c:.2f} | η_d={eta_d:.2f} | SOC_init={soc_init:.1f} kWh"
+        f"eff_c={eta_c:.2f} | eff_d={eta_d:.2f} | SOC_init={soc_init:.1f} kWh"
     )
     logger.info(
         f"  [{s}.1] dimensiones: T={T} | U={U} | B={B} bloques | "
@@ -429,6 +430,7 @@ def resolver_lp_bateria(
             grid_import = cons_tot - self_tot - m.discharge[t]
             grid_export = m.g[t] - self_tot - m.charge[t]
             total += m.pbuy[t] * grid_import - m.psell[t] * grid_export
+            total += c_deg * (m.charge[t] + m.discharge[t])
         return total
 
     m.obj = Objective(rule=obj_rule, sense=minimize)
@@ -500,16 +502,19 @@ def resolver_lp_bateria(
     total_cost   = sum(cost_ts)
     total_charge = sum(charge_ts)
     total_disch  = sum(discharge_ts)
+
+    efc = (total_charge + total_disch) / (2.0 * bat_cap) if bat_cap > 0 else 0.0
     logger.info(
         f"  [{s}.4] balance: self={total_self:.1f} kWh | imp={total_imp:.1f} kWh | "
         f"exp={total_exp:.1f} kWh | charge={total_charge:.1f} kWh | "
-        f"discharge={total_disch:.1f} kWh | cost={total_cost:.2f} €"
+        f"discharge={total_disch:.1f} kWh | cost={total_cost:.2f} € | EFC={efc:.3f}"
     )
 
     return (
         self_ts, imp_ts, exp_ts, cost_ts,
         charge_ts, discharge_ts, soc_ts,
         alpha_vals, per_user_self, per_user_imp,
+        efc,
     )
 
 
@@ -536,7 +541,7 @@ def reparto_fijo(df, users, logger):
     for i in range(U):
         partes.append(f"u{i+1}={alpha_fx[i+1]:.3f}")
     logger.info(
-        "  [fx] α: " + " | ".join(partes) +
+        "  [fx] alpha: " + " | ".join(partes) +
         f" | p_buy_medio={p_buy_fx:.4f} | p_sell_medio={p_sell_fx:.4f}"
     )
 
@@ -674,19 +679,33 @@ def optimizar(
         eta_c    = float(battery_cfg.efficiency_charge)
         eta_d    = float(battery_cfg.efficiency_discharge)
         soc_init = float(battery_cfg.initial_soc_fraction) * bat_cap
-        logger.info("[6.7/7] OPTIMIZACIÓN DINÁMICA + BATERÍA")
+        c_deg = (
+            float(battery_cfg.replacement_cost_eur) /
+            (2.0 * bat_cap * float(battery_cfg.lifecycle_cycles))
+            if bat_cap > 0 and battery_cfg.lifecycle_cycles > 0 else 0.0
+        )
+        logger.info(
+            f"[6.7/7] OPTIMIZACIÓN DINÁMICA + BATERÍA | "
+            f"c_deg={c_deg:.4f} €/kWh (reemplazo={battery_cfg.replacement_cost_eur:.0f} € | "
+            f"ciclos={battery_cfg.lifecycle_cycles})"
+        )
         (self_bat_ts, imp_bat_ts, exp_bat_ts, cost_bat_ts,
          charge_bat_ts, discharge_bat_ts, soc_bat_ts,
-         alpha_bat, pu_self_bat, pu_imp_bat) = resolver_lp_bateria(
+         alpha_bat, pu_self_bat, pu_imp_bat,
+         bat_efc) = resolver_lp_bateria(
             df, users, b_of_t_dyn, B_dyn,
             bat_cap, bat_pow, eta_c, eta_d, soc_init,
             solver, tee, logger, step_num=7, datos=datos_dyn,
+            c_deg=c_deg,
         )
+        bat_soh_loss_pct = bat_efc / float(battery_cfg.lifecycle_cycles) * 20.0
     else:
         self_bat_ts = imp_bat_ts = exp_bat_ts = cost_bat_ts = []
         charge_bat_ts = discharge_bat_ts = soc_bat_ts = []
         alpha_bat = {}
         pu_self_bat = pu_imp_bat = {}
+        bat_efc = None
+        bat_soh_loss_pct = None
 
     cost_ex_ante = float(pd.Series(cost_ex_ts).sum())
     cost_prop    = float(pd.Series(cost_dyn_ts).sum())
@@ -820,6 +839,8 @@ def optimizar(
         "imp_per_user_bat":        imp_pu_bat  if run_battery else {},
         "bat_capacity_kwh":        battery_cfg.capacity_kwh  if run_battery else None,
         "bat_power_kw":            battery_cfg.power_kw       if run_battery else None,
+        "bat_efc":                 bat_efc                    if run_battery else None,
+        "bat_soh_loss_pct":        bat_soh_loss_pct           if run_battery else None,
 
         "exante_updates_per_year": int(updates_per_year),
         "dynamic_block_mode":      str(dynamic_block_mode),

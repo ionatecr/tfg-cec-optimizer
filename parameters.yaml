@@ -27,6 +27,8 @@ battery:
   efficiency_charge: 0.95
   efficiency_discharge: 0.95
   initial_soc_fraction: 0
+  replacement_cost_eur: 500.0
+  lifecycle_cycles: 4000
 
 io:
   csv:
