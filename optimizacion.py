@@ -152,7 +152,6 @@ def corregir_alpha(alpha_vals, b_of_t, T, U, g, cons):
             for u in range(1, U + 1):
                 d_b += cons[(u, t)]
 
-        # si FV es mayor o igual que la demanda o no hay FV el reparto es proporcional a la demanda
         if (g_b >= d_b or g_b <= 1e-6) and d_b > 0:
             n_deg += 1
             for u in range(1, U + 1):
@@ -377,7 +376,6 @@ def resolver_lp_bateria(
     m.discharge = Var(m.T, domain=NonNegativeReals, bounds=(0.0, bat_pow))
     m.SOC       = Var(m.T, domain=NonNegativeReals, bounds=(0.0, bat_cap))
 
-    # Binary variables to prevent simultaneous charge and discharge (MILP)
     m.charge_bin    = Var(m.T, domain=Binary)
     m.discharge_bin = Var(m.T, domain=Binary)
     m.no_simul      = Constraint(m.T, rule=lambda m, t: m.charge_bin[t] + m.discharge_bin[t] <= 1)
@@ -401,12 +399,10 @@ def resolver_lp_bateria(
         m.T, rule=lambda m, t: sum(m.self_v[u, t] for u in m.U) <= m.g[t]
     )
 
-    # la batería solo carga con excedente FV
     m.charge_from_surplus = Constraint(
         m.T,
         rule=lambda m, t: sum(m.self_v[u, t] for u in m.U) + m.charge[t] <= m.g[t]
     )
-    # la batería solo descarga para cubrir demanda
     m.discharge_to_demand = Constraint(
         m.T,
         rule=lambda m, t: sum(m.self_v[u, t] for u in m.U) + m.discharge[t] <= sum(m.cons[u, t] for u in m.U)
@@ -419,7 +415,6 @@ def resolver_lp_bateria(
             RangeSet(2, T),
             rule=lambda m, t: m.SOC[t] == m.SOC[t - 1] + eta_c * m.charge[t] - m.discharge[t] / eta_d
         )
-    # la batería termina vacía: se vende toda la energía almacenada
     m.soc_terminal = Constraint(expr=m.SOC[T] == 0)
 
     def obj_rule(m):
@@ -656,7 +651,6 @@ def optimizar(
         logger.info(f"  [4.3] ex ante: {B_ex} bloques (updates_per_year={updates_per_year})")
         logger.info(f"  [4.4] dinámico: {B_dyn} bloques (mode='{dynamic_block_mode}')")
 
-        # --- Pre-compute data dicts (shared by all solvers) ---
         datos_ex  = _preparar_datos(df, users, b_of_t_ex)
         datos_dyn = _preparar_datos(df, users, b_of_t_dyn) if b_of_t_dyn != b_of_t_ex else datos_ex
 
@@ -909,7 +903,7 @@ def optimizar(
         extra_cols[f"imp_fx_{s}"]    = pu_imp_fx[u_idx]
         extra_cols[f"alpha_ex_{s}"]   = [alpha_ex.get((u_idx,  b_of_t_ex[t + 1]),  0.0) for t in range(T)]
         extra_cols[f"alpha_prop_{s}"] = [alpha_dyn.get((u_idx, b_of_t_dyn[t + 1]), 0.0) for t in range(T)]
-        extra_cols[f"alpha_fx_{s}"]   = [alpha_fx[u_idx]] * T  # constante
+        extra_cols[f"alpha_fx_{s}"]   = [alpha_fx[u_idx]] * T
         if run_battery and pu_self_bat and u_idx in pu_self_bat:
             extra_cols[f"self_bat_{s}"]   = pu_self_bat[u_idx]
             extra_cols[f"imp_bat_{s}"]    = pu_imp_bat[u_idx]
@@ -918,13 +912,11 @@ def optimizar(
     df_ts = pd.concat([df_ts, pd.DataFrame(extra_cols, index=df_ts.index)], axis=1)
 
     out_base_cache = {
-        # Infrastructure (steps 2-4)
         "df": df, "users": users, "T": T, "U": U,
         "b_of_t_ex": b_of_t_ex, "B_ex": B_ex,
         "b_of_t_dyn": b_of_t_dyn, "B_dyn": B_dyn,
         "solver": solver, "solver_used": solver_used, "tee": tee,
         "datos_dyn": datos_dyn,
-        # Solver results (steps 5, 6, 6.5)
         "ex_ante": (self_ex_ts, imp_ex_ts, exp_ex_ts, cost_ex_ts,
                     alpha_ex, pu_self_ex, pu_imp_ex),
         "dynamic": (self_dyn_ts, imp_dyn_ts, exp_dyn_ts, cost_dyn_ts,

@@ -94,7 +94,6 @@ def prepare_inputs(df_c, df_pv, df_buy, df_sell):
     cols = cfg.io.columns
     time_candidates = cols.time
 
-    # perfiles de consumo
     tc = buscar_col_tiempo(df_c, time_candidates)
     df_c = normalizar_tiempo(df_c, tc, cfg)
     prefix = cols.consumption_prefix
@@ -112,7 +111,6 @@ def prepare_inputs(df_c, df_pv, df_buy, df_sell):
     
     _log.info(f"  [2.1] consumos: {len(df_c)} filas | {len(users)} usuarios → {users}")
 
-    # pv
     tpv = buscar_col_tiempo(df_pv, time_candidates)
     df_pv = normalizar_tiempo(df_pv, tpv, cfg)
     if cols.pv not in df_pv.columns:
@@ -123,7 +121,6 @@ def prepare_inputs(df_c, df_pv, df_buy, df_sell):
     df_pv = df_pv[["Time", cols.pv]].rename(columns={cols.pv: "pv_kWh"})
     _log.info(f"  [2.2] pv: {len(df_pv)} filas")
 
-    # precio compra
     tbuy = buscar_col_tiempo(df_buy, time_candidates)
     df_buy = normalizar_tiempo(df_buy, tbuy, cfg)
     if cols.buy not in df_buy.columns:
@@ -134,7 +131,6 @@ def prepare_inputs(df_c, df_pv, df_buy, df_sell):
     df_buy = df_buy[["Time", cols.buy]].rename(columns={cols.buy: "p_buy"})
     _log.info(f"  [2.3] buy: {len(df_buy)} filas")
 
-    # precio venta
     tsell = buscar_col_tiempo(df_sell, time_candidates)
     df_sell = normalizar_tiempo(df_sell, tsell, cfg)
     if cols.sell not in df_sell.columns:
@@ -174,7 +170,6 @@ def prepare_inputs(df_c, df_pv, df_buy, df_sell):
 
     df = df.dropna(subset=["Time"]).sort_values("Time").reset_index(drop=True)
 
-    # Comprobar huecos temporales
     if len(df) >= 2:
         diffs = df["Time"].diff().dropna()
         dt_mode = diffs.mode().iloc[0]

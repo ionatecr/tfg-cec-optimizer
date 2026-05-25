@@ -317,14 +317,14 @@ def run_controls():
                                                                    tooltip={"placement": "bottom", "always_visible": False}),
                                                     ], md=6, className="mt-2"),
                                                     dbc.Col([
-                                                        html.Div("Coste reemplazo (€)", className="param-label"),
-                                                        dbc.Input(id="bat-replacement-cost", type="number", value=500.0,
-                                                                  min=0, max=100000, step=50,
+                                                        html.Div("CAPEX (€/kWh)", className="param-label"),
+                                                        dbc.Input(id="bat-fin-cost-kwp", type="number", value=250,
+                                                                  min=100, max=800, step=10,
                                                                   className="param-input"),
                                                     ], md=6, className="mt-2"),
                                                     dbc.Col([
                                                         html.Div("Ciclos de vida", className="param-label"),
-                                                        dbc.Input(id="bat-lifecycle-cycles", type="number", value=4000,
+                                                        dbc.Input(id="bat-lifecycle-cycles", type="number", value=7000,
                                                                   min=100, max=20000, step=100,
                                                                   className="param-input"),
                                                     ], md=6, className="mt-2"),

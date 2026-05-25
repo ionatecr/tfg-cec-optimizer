@@ -223,7 +223,7 @@ def load_config(path="parameters.yaml"):
             efficiency_discharge=float(bat.get("efficiency_discharge", 0.95)),
             initial_soc_fraction=float(bat.get("initial_soc_fraction", 0.0)),
             replacement_cost_eur=float(bat.get("replacement_cost_eur", 500.0)),
-            lifecycle_cycles=int(bat.get("lifecycle_cycles", 4000)),
+            lifecycle_cycles=int(bat.get("lifecycle_cycles", 7000)),
         ),
         io=IoConfig(
             csv=CsvConfig(

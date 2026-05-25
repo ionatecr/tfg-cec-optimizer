@@ -21,7 +21,6 @@ def validate_prepared_inputs(prep, strict=True):
     issues = []
     df = prep.df
 
-    # 3.1 Que existan las columnas Time, pv_kWh, p_buy, p_sell
     required = {prep.time_col, prep.pv_col, prep.buy_col, prep.sell_col}
     missing = []
     for c in required:
@@ -35,7 +34,6 @@ def validate_prepared_inputs(prep, strict=True):
     else:
         _log.info("  [3.1] columnas requeridas: OK")
 
-    # 3.2 Que haya al menos un usuario detectado
     if not prep.users:
         _log.error("  [3.2] usuarios: NINGUNO DETECTADO")
         issues.append(Issue("ERROR", "NO_USERS",
@@ -52,7 +50,6 @@ def validate_prepared_inputs(prep, strict=True):
         _log.warning("  validación abortada por errores críticos")
         return issues
 
-    # 3.3 Que Time sea datetime, sin NaT y sin duplicados
     if prep.time_col in df.columns:
         dtype_ok = pd.api.types.is_datetime64_any_dtype(df[prep.time_col])
         n_nat = int(df[prep.time_col].isna().sum())
@@ -71,7 +68,6 @@ def validate_prepared_inputs(prep, strict=True):
                                 f"Hay {n_dup} timestamps duplicados en Time.",
                                 "Revisa si quitar_duplicados() se está aplicando correctamente."))
 
-    # 3.4 Que no haya huecos temporales grandes (> 2 veces la diferencia normal)
     if len(df) > 2 and prep.time_col in df.columns and pd.api.types.is_datetime64_any_dtype(df[prep.time_col]):
         diffs = df[prep.time_col].diff().dropna()
         if not diffs.empty:
@@ -85,7 +81,6 @@ def validate_prepared_inputs(prep, strict=True):
                                     f"{len(gaps)} huecos en la serie temporal superiores a 2×dt ({dt_mode}).",
                                     "Puede haber días/horas faltantes que afecten al resultado."))
 
-    # 3.5 Que todas las columnas numericas sean realmente numericas
     numeric_cols = [prep.pv_col, prep.buy_col, prep.sell_col] + list(prep.users)
     bad_cols = []
     for c in numeric_cols:
@@ -100,7 +95,6 @@ def validate_prepared_inputs(prep, strict=True):
     else:
         _log.info(f"  [3.5] tipos numéricos: OK ({len(numeric_cols)} columnas)")
 
-    # 3.6 Que no haya valores negativos en PV ni en consumos
     cols_a_revisar = [prep.pv_col] + list(prep.users)
     neg_cols = []
     for c in cols_a_revisar:
@@ -116,7 +110,6 @@ def validate_prepared_inputs(prep, strict=True):
     else:
         _log.info("  [3.6] valores negativos: OK")
 
-    # 3.7 Que el DataFrame no este vacio y tenga al menos 24 filas
     if len(df) == 0:
         _log.error("  [3.7] longitud: VACÍO")
         issues.append(Issue("ERROR" if strict else "WARN", "EMPTY_DF",
@@ -133,7 +126,6 @@ def validate_prepared_inputs(prep, strict=True):
     if len(df) == 0:
         return issues
 
-    # 3.8 Que la generacion FV sea razonable respecto a la demanda (entre 1% y 300%)
     if prep.pv_col in df.columns and prep.users:
         gen_total = float(df[prep.pv_col].sum())
         dem_total = float(df[prep.users].sum().sum())
@@ -152,7 +144,6 @@ def validate_prepared_inputs(prep, strict=True):
             else:
                 _log.info(f"  [3.8] ratio FV/demanda: {fv_ratio:.1%} | G={gen_total:.0f} kWh | D={dem_total:.0f} kWh → OK")
 
-    # 3.9 Que el precio de compra no sea sistematicamente menor que el de venta
     if (prep.buy_col in df.columns and prep.sell_col in df.columns
             and pd.api.types.is_numeric_dtype(df[prep.buy_col])
             and pd.api.types.is_numeric_dtype(df[prep.sell_col])):
@@ -169,7 +160,6 @@ def validate_prepared_inputs(prep, strict=True):
                                 f"{n_neg_b} periodos con precio de compra negativo.",
                                 "Normal en PVPC con muchas renovables; verifica que no sea un error."))
 
-    # 3.10 Que ningun usuario tenga demanda total = 0
     zero_u = []
     for u in prep.users:
         if u in df.columns and pd.api.types.is_numeric_dtype(df[u]) and float(df[u].sum()) <= 0:
@@ -187,7 +177,6 @@ def validate_prepared_inputs(prep, strict=True):
                 totals[u] = f"{df[u].sum():.0f}"
         _log.info(f"  [3.10] demanda por usuario: OK → {totals} kWh")
 
-    # 3.11 Que no haya generacion FV entre la 1h y las 5h
     if (prep.pv_col in df.columns and prep.time_col in df.columns
             and pd.api.types.is_datetime64_any_dtype(df[prep.time_col])):
         night_mask = df[prep.time_col].dt.hour.isin(range(1, 6))

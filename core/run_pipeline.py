@@ -125,7 +125,7 @@ def run_pipeline(
                 f"  [1.4] batería habilitada: cap={bat_cfg.capacity_kwh} kWh | "
                 f"P={bat_cfg.power_kw} kW | eff_c={bat_cfg.efficiency_charge} | eff_d={bat_cfg.efficiency_discharge}"
             )
-        df_c = df_pv = df_buy = df_sell = None  # not needed, data is in base_cache
+        df_c = df_pv = df_buy = df_sell = None
     else:
         logger.info("[1/7] CARGA DE DATOS")
         logger.info(

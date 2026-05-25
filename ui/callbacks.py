@@ -39,12 +39,11 @@ PAGE_TITLES = {
     "export":      "Exportar",
 }
 
-CO2_FACTOR_KG_KWH = 0.25  # kg CO2/kWh (media anual red española)
+CO2_FACTOR_KG_KWH = 0.25
 
 
 
 def formato_num(x, dec: int = 0) -> str:
-    """Formato español: punto para miles, coma para decimales."""
     try:
         s = f"{float(x):,.{dec}f}"
         return s.replace(",", "\x00").replace(".", ",").replace("\x00", ".")
@@ -65,6 +64,14 @@ def formato_pct(x):
 def a_float(x, default: float = 0.0) -> float:
     try:    return float(x)
     except (ValueError, TypeError): return default
+
+
+def _sf(v, fallback: float = 0.0) -> float:
+    try:
+        f = float(v)
+        return f if math.isfinite(f) else fallback
+    except (TypeError, ValueError):
+        return fallback
 
 
 def col_tiempo(df: pd.DataFrame) -> str | None:
@@ -274,7 +281,6 @@ def crear_excel(payload: dict, run_tag: str, sections: list[str], fin_store: dic
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         wb = writer.book
 
-        # --- Information sheet (always first) ---
         _SHEET_INFO = {
             "comparativa": ("Comparison",          "Model comparison: cost, self-consumption, import/export ratios and energy KPIs for each optimised allocation model."),
             "series":      ("Time Series",         "Hourly time series: PV generation, demand, prices, self-consumption, grid import/export and cost for each model and timestamp."),
@@ -308,7 +314,6 @@ def crear_excel(payload: dict, run_tag: str, sections: list[str], fin_store: dic
         ws_info.column_dimensions["A"].width = 24
         ws_info.column_dimensions["B"].width = 72
 
-        # Column rename maps for English export
         _COL_RENAME = {
             "Modelo":             "Model",
             "Coste (€)":          "Cost (EUR)",
@@ -339,7 +344,6 @@ def crear_excel(payload: dict, run_tag: str, sections: list[str], fin_store: dic
         }
 
         def _user_to_en(name: str) -> str:
-            """'Usuario 3' -> 'User 3'"""
             return name.replace("Usuario ", "User ") if name.startswith("Usuario ") else name
 
         if "comparativa" in sections:
@@ -426,7 +430,6 @@ def crear_excel(payload: dict, run_tag: str, sections: list[str], fin_store: dic
             lifetime_v  = int(p.get("lifetime", 15))
 
             ws_fin = wb.create_sheet("Battery - Financial")
-            # -- Parameters block --
             params_df = pd.DataFrame([
                 {"Parameter": "Battery CAPEX (EUR/kWh)",         "Value": p.get("capex_kwh", "-")},
                 {"Parameter": "Installed capacity (kWh)",        "Value": round(optimal_cap, 1)},
@@ -438,8 +441,7 @@ def crear_excel(payload: dict, run_tag: str, sections: list[str], fin_store: dic
                 {"Parameter": "Useful life (years)",             "Value": p.get("lifetime", "-")},
             ])
             _write_df(ws_fin, params_df, "Battery -- Financial Parameters and Results")
-            # -- Results block --
-            row_offset = len(params_df) + 6   # title(2) + blank(1) + header(1) + data(n) + blank(1)
+            row_offset = len(params_df) + 6
             results_df = pd.DataFrame([
                 {"Metric": "Estimated annual savings (EUR/yr)", "Value": round(annual_sav, 2)},
                 {"Metric": "NPV - Net Present Value (EUR)",     "Value": round(npv, 2)},
@@ -462,7 +464,6 @@ def crear_excel(payload: dict, run_tag: str, sections: list[str], fin_store: dic
                     cell.border = THIN_BORDER
                     cell.alignment = LEFT
                 r_start += 1
-            # -- Annual cash flow block --
             r_start += 1
             c_cf = ws_fin.cell(r_start, 1, "Annual Cash Flow")
             c_cf.font = Font(bold=True, size=11, color="014593")
@@ -474,10 +475,12 @@ def crear_excel(payload: dict, run_tag: str, sections: list[str], fin_store: dic
                                     "O&M (EUR)": 0.0, "Net flow (EUR)": round(-investment, 2),
                                     "Cumulative (EUR)": round(cumulative[i], 2)})
                 else:
-                    sav_yr = round(annual_sav * ((1 + inflation_v) ** yr), 2)
-                    net_yr = round(sav_yr - om_annual, 2)
+                    infl_f = (1 + inflation_v) ** (yr - 1)
+                    sav_yr = round(annual_sav * infl_f, 2)
+                    om_yr  = round(om_annual  * infl_f, 2)
+                    net_yr = round(sav_yr - om_yr, 2)
                     cf_rows.append({"Year": yr, "Savings (EUR)": sav_yr,
-                                    "O&M (EUR)": round(-om_annual, 2),
+                                    "O&M (EUR)": round(-om_yr, 2),
                                     "Net flow (EUR)": net_yr,
                                     "Cumulative (EUR)": round(cumulative[i], 2)})
             cf_df = pd.DataFrame(cf_rows)
@@ -497,7 +500,6 @@ def crear_excel(payload: dict, run_tag: str, sections: list[str], fin_store: dic
                 ws_fin.column_dimensions[get_column_letter(ci)].width = 22
 
         if "bateria_soc" in sections:
-            # Buscar modelo con batería y columna soc_bat
             bat_model = next(
                 (m for m in (payload.get("models") or [])
                  if m.get("Tipo") == "bateria" and m.get("Coste (€)") is not None),
@@ -788,7 +790,7 @@ def register_callbacks(app, cfg):
         State("bat-power",           "value"),
         State("bat-eta-c",           "value"),
         State("bat-eta-d",           "value"),
-        State("bat-replacement-cost","value"),
+        State("bat-fin-cost-kwp",    "value"),
         State("bat-lifecycle-cycles","value"),
         prevent_initial_call=True,
     )
@@ -800,7 +802,7 @@ def register_callbacks(app, cfg):
         cons, pv, buy, sell,
         solver_name, exante_mode_list, dynamic_modes_list,
         battery_enabled, bat_capacity, bat_power, bat_eta_c, bat_eta_d,
-        bat_replacement_cost, bat_lifecycle_cycles,
+        bat_capex_kwh, bat_lifecycle_cycles,
     ):
         triggered = ctx.triggered_id
         use_sample = (triggered == "sample-data-btn")
@@ -847,8 +849,8 @@ def register_callbacks(app, cfg):
             p_sell_manual       = 0.08
             tariff_mode         = "indexed"
 
-        exante_mode_list   = exante_mode_list  or ["rd"]
-        dynamic_modes_list = list(dict.fromkeys(dynamic_modes_list or ["hour"]))
+        exante_mode_list   = list(dict.fromkeys(["rd"] + list(exante_mode_list or [])))
+        dynamic_modes_list = list(dict.fromkeys(dynamic_modes_list or []))
 
         upload_contents = {"cons": cons, "pv": pv, "buy": buy, "sell": sell}
         mode            = "default" if use_sample else "csv"
@@ -880,8 +882,8 @@ def register_callbacks(app, cfg):
         last_ts       = pd.DataFrame()
         first_dm      = dynamic_modes_list[0] if dynamic_modes_list else "hour"
         session_id    = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")[:23]
-        run_cache     = {}  # (exante_updates, dynamic_mode, has_bat) -> (summary, ts, run_tag)
-        base_cache_store = {}  # (exante_updates, dynamic_mode) -> base_cache from optimizar
+        run_cache     = {}
+        base_cache_store = {}
 
         def _cached_run(u, dm, label_for_err, bat_ov=None):
             key = (u, dm, bool(bat_ov))
@@ -890,7 +892,6 @@ def register_callbacks(app, cfg):
             ov = dict(overrides_base, exante_updates_per_year=u, dynamic_block_mode=dm)
             if bat_ov:
                 ov.update(bat_ov)
-            # Reuse base results when running battery variant
             bc = base_cache_store.get((u, dm)) if bat_ov else None
             try:
                 results, run_tag, _, out_base_cache = run_pipeline(
@@ -980,8 +981,8 @@ def register_callbacks(app, cfg):
                 "battery_eta_c":              float((bat_eta_c or 95)) / 100.0,
                 "battery_eta_d":              float((bat_eta_d or 95)) / 100.0,
                 "battery_soc_init":           cfg.battery.initial_soc_fraction,
-                "battery_replacement_cost":   float(bat_replacement_cost or 500.0),
-                "battery_lifecycle_cycles":   int(bat_lifecycle_cycles or 4000),
+                "battery_replacement_cost":   float(bat_capex_kwh or 250) * float(bat_capacity or 10),
+                "battery_lifecycle_cycles":   int(bat_lifecycle_cycles or 7000),
             }
             result_bat, err_bat = _cached_run(u_bat, bat_dm, bat_label, bat_ov=bat_ov)
             if err_bat:
@@ -996,16 +997,16 @@ def register_callbacks(app, cfg):
                 summary_bat, ts_bat, run_tag_bat = result_bat
                 last_run_tag = run_tag_bat
                 if summary_bat.get("battery_enabled") and summary_bat.get("cost_bat") is not None:
-                    cost_bat   = float(summary_bat["cost_bat"])
-                    self_bat   = float(summary_bat.get("self_bat", 0) or 0)
-                    imp_bat    = float(summary_bat.get("imp_bat", 0) or 0)
-                    exp_bat    = float(summary_bat.get("exp_bat", 0) or 0)
-                    disch_bat  = float(summary_bat.get("discharge_bat_total", 0) or 0)
-                    d_tot      = float(summary_bat.get("demand_total", 1) or 1)
-                    g_tot      = float(summary_bat.get("gen_total", 1) or 1)
-                    self_pct_b = (self_bat + disch_bat) / d_tot * 100 if d_tot > 0 else 0
-                    imp_pct_b  = imp_bat / d_tot * 100 if d_tot > 0 else 0
-                    exp_pct_b  = exp_bat / g_tot * 100 if g_tot > 0 else 0
+                    cost_bat   = _sf(summary_bat["cost_bat"])
+                    self_bat   = _sf(summary_bat.get("self_bat"))
+                    imp_bat    = _sf(summary_bat.get("imp_bat"))
+                    exp_bat    = _sf(summary_bat.get("exp_bat"))
+                    disch_bat  = _sf(summary_bat.get("discharge_bat_total"))
+                    d_tot      = _sf(summary_bat.get("demand_total"), 1.0) or 1.0
+                    g_tot      = _sf(summary_bat.get("gen_total"),    1.0) or 1.0
+                    self_pct_b = (self_bat + disch_bat) / d_tot * 100 if d_tot > 0 else 0.0
+                    imp_pct_b  = imp_bat / d_tot * 100 if d_tot > 0 else 0.0
+                    exp_pct_b  = exp_bat / g_tot * 100 if g_tot > 0 else 0.0
                     pu_bat     = coste_por_usuario(summary_bat, "bat") or coste_por_usuario(summary_bat, "prop")
                     bat_efc_val      = summary_bat.get("bat_efc")
                     bat_soh_loss_val = summary_bat.get("bat_soh_loss_pct")
@@ -1024,12 +1025,12 @@ def register_callbacks(app, cfg):
                         "battery_capacity_kwh": float(bat_capacity or 10.0),
                         "bat_efc":              bat_efc_val,
                         "bat_soh_loss_pct":     bat_soh_loss_val,
-                        "bat_lifecycle_cycles": int(bat_lifecycle_cycles or 4000),
+                        "bat_lifecycle_cycles": int(bat_lifecycle_cycles or 7000),
+                        "bat_capex_kwh":        float(bat_capex_kwh or 250),
                     })
                     if isinstance(ts_bat, pd.DataFrame) and not ts_bat.empty:
                         series[bat_label] = {"columns": list(ts_bat.columns), "rows": ts_bat.to_dict("records")}
 
-        # reparto fijo proporcional (sin optimizador)
         if last_summary:
             label_fx = "Reparto proporcional"
             cost_fx, self_fx, self_pct_fx, exp_fx, exp_pct_fx, imp_fx, imp_pct_fx = calcular_porcentajes(last_summary, "fijo")
@@ -1132,7 +1133,6 @@ def register_callbacks(app, cfg):
         else:
             kpi_co2 = f"{formato_num(best_imp_pct_val, 2)}%"
 
-        # fuente más pequeña si el nombre del modelo es largo
         model_font = "18px" if len(best_model) > 14 else "22px" if len(best_model) > 10 else "26px"
         kpi_model_el = html.Span(best_model, style={"fontSize": model_font})
 
@@ -1191,7 +1191,6 @@ def register_callbacks(app, cfg):
                 (m_merged.loc[ok, "cum_ref"] - m_merged.loc[ok, "cum_best"])
                 / m_merged.loc[ok, "cum_ref"] * 100.0
             )
-            # resample semanal para no saturar el gráfico
             m_wk = (m_merged.set_index("Time")[["sav_pct", "sav_eur"]]
                              .resample("7D").last()
                              .reset_index()
@@ -1206,7 +1205,7 @@ def register_callbacks(app, cfg):
             ]
 
         self_pct = a_float(best_row.get("% Autoconsumo", 0))
-        imp_pct  = max(0.0, 100.0 - self_pct)   # garantiza self + imp = 100 %
+        imp_pct  = max(0.0, 100.0 - self_pct)
         exp_pct  = a_float(best_row.get("% Excedente",    0))
 
         eb_rows = []
@@ -1252,25 +1251,26 @@ def register_callbacks(app, cfg):
         max_cost_r = float(df_rank["Coste (€)"].max()) if not df_rank.empty else 1.0
 
         def _mini_bar(label, pct, color):
+            pct_safe = pct if math.isfinite(pct) else 0.0
+            pct_txt  = f"{formato_num(pct_safe, 1)}%" if math.isfinite(pct) else "—"
             return html.Div([
                 html.Div([
                     html.Span(label, style={
                         "fontSize": "10px", "color": "var(--text-muted)",
                         "fontWeight": "600", "flex": "1",
                     }),
-                    html.Span(f"{formato_num(pct, 1)}%", style={
+                    html.Span(pct_txt, style={
                         "fontSize": "10px", "fontWeight": "700", "color": color,
                     }),
                 ], style={"display": "flex", "alignItems": "center", "marginBottom": "2px"}),
                 html.Div(
-                    html.Div(style={"width": f"{min(pct, 100):.1f}%", "height": "4px",
+                    html.Div(style={"width": f"{min(pct_safe, 100):.1f}%", "height": "4px",
                                     "background": color, "borderRadius": "2px"}),
                     style={"background": "var(--bg)", "borderRadius": "2px",
                            "overflow": "hidden", "marginBottom": "5px"},
                 ),
             ])
 
-        # teal para el mejor, azul degradado para el resto
         _RANK_BAR_COLORS = ["#18BC9C", "#2E6DB4", "#5B8DB8", "#8AAFC8", "#A8C3D4"]
 
         rank_items = []
@@ -1281,8 +1281,8 @@ def register_callbacks(app, cfg):
             tipo        = row.get("Tipo", "ex_ante")
             bar_pct     = (cost_v / max_cost_r * 100) if max_cost_r > 0 else 0.0
             bar_col     = _RANK_BAR_COLORS[min(idx, len(_RANK_BAR_COLORS) - 1)]
-            self_pct_r  = a_float(row.get("% Autoconsumo", 0))
-            imp_pct_r   = a_float(row.get("% Importación", 0))
+            self_pct_r  = _sf(row.get("% Autoconsumo", 0))
+            imp_pct_r   = _sf(row.get("% Importación", 0))
 
             if ref_cost and cost_v and mn != ref_label:
                 sav     = ref_cost - cost_v
@@ -1432,65 +1432,109 @@ def register_callbacks(app, cfg):
         equidad_display = html.Div()
 
         if all_users and ref_mrow and best_mrow:
-            rates = []
+            raw_rates = []
             for u in all_users:
                 ref_u  = a_float((ref_mrow.get("cost_per_user") or {}).get(u, 0))
                 best_u = a_float((best_mrow.get("cost_per_user") or {}).get(u, 0))
-                rates.append((ref_u - best_u) / ref_u if abs(ref_u) > 1e-9 else 0.0)
+                raw_rates.append((ref_u - best_u) / ref_u if abs(ref_u) > 1e-9 else 0.0)
 
-            n = len(rates)
-            sum_r  = sum(rates)
-            sum_r2 = sum(r * r for r in rates)
-            if sum_r2 > 1e-12:
-                jain = (sum_r ** 2) / (n * sum_r2)
-                equidad_pct = max(0.0, min(100.0, jain * 100.0))
-            else:
-                equidad_pct = 100.0
+            total_ref  = sum(a_float((ref_mrow.get("cost_per_user") or {}).get(u, 0)) for u in all_users)
+            total_best = sum(a_float((best_mrow.get("cost_per_user") or {}).get(u, 0)) for u in all_users)
+            total_saving_pct = (total_ref - total_best) / total_ref * 100 if abs(total_ref) > 1e-9 else 0.0
 
-            eq_color = "#27AE60" if equidad_pct >= 70 else ("#F39C12" if equidad_pct >= 40 else "#E74C3C")
-            eq_label = ("Distribución equitativa" if equidad_pct >= 70
-                        else ("Distribución moderada" if equidad_pct >= 40
-                              else "Distribución desigual"))
+            _MIN_SAVING_PCT = 0.5
 
-            equidad_display = dbc.Card(
-                dbc.CardBody([
-                    html.Div([
-                        html.Div(
-                            html.I(className="bi bi-bar-chart-steps",
-                                   style={"fontSize": "16px", "color": eq_color}),
-                            style={"width": "36px", "height": "36px", "borderRadius": "8px",
-                                   "background": f"color-mix(in srgb, {eq_color} 12%, white)",
-                                   "display": "flex", "alignItems": "center",
-                                   "justifyContent": "center", "flexShrink": "0"},
-                        ),
+            if total_saving_pct < _MIN_SAVING_PCT:
+                eq_color = "#6B7280"
+                equidad_display = dbc.Card(
+                    dbc.CardBody([
                         html.Div([
-                            html.Div("Índice de equidad de reparto", style={
-                                "fontSize": "10px", "fontWeight": "700",
-                                "color": "var(--text-muted)", "textTransform": "uppercase",
-                                "letterSpacing": "0.5px", "marginBottom": "2px",
-                            }),
+                            html.Div(
+                                html.I(className="bi bi-bar-chart-steps",
+                                       style={"fontSize": "16px", "color": eq_color}),
+                                style={"width": "36px", "height": "36px", "borderRadius": "8px",
+                                       "background": "color-mix(in srgb, #6B7280 12%, white)",
+                                       "display": "flex", "alignItems": "center",
+                                       "justifyContent": "center", "flexShrink": "0"},
+                            ),
                             html.Div([
-                                html.Span(f"{formato_num(equidad_pct, 0)}%", style={
-                                    "fontSize": "26px", "fontWeight": "900",
-                                    "color": eq_color, "lineHeight": "1", "marginRight": "8px",
+                                html.Div("Índice de equidad de reparto", style={
+                                    "fontSize": "10px", "fontWeight": "700",
+                                    "color": "var(--text-muted)", "textTransform": "uppercase",
+                                    "letterSpacing": "0.5px", "marginBottom": "2px",
                                 }),
-                                html.Span(eq_label, style={
+                                html.Div("Ahorro insuficiente para evaluar equidad", style={
                                     "fontSize": "13px", "color": eq_color, "fontWeight": "700",
                                 }),
-                            ], style={"display": "flex", "alignItems": "baseline"}),
-                        ], style={"marginLeft": "12px"}),
-                    ], style={"display": "flex", "alignItems": "center",
-                              "marginBottom": "8px"}),
-                    html.Div(
-                        "Un valor próximo al 100 % indica que el beneficio de la optimización "
-                        "se distribuye de forma proporcional a la demanda de cada miembro de la comunidad.",
-                        style={"fontSize": "11.5px", "color": "var(--text-muted)",
-                               "lineHeight": "1.6"},
-                    ),
-                ]),
-                className="chart-card",
-                style={"borderLeft": f"4px solid {eq_color}"},
-            )
+                            ], style={"marginLeft": "12px"}),
+                        ], style={"display": "flex", "alignItems": "center",
+                                  "marginBottom": "8px"}),
+                        html.Div(
+                            f"El ahorro total del mejor modelo es inferior al {_MIN_SAVING_PCT:.0f} % "
+                            "respecto al ex ante. Con ahorros tan pequeños el índice de Jain no es representativo.",
+                            style={"fontSize": "11.5px", "color": "var(--text-muted)",
+                                   "lineHeight": "1.6"},
+                        ),
+                    ]),
+                    className="chart-card",
+                    style={"borderLeft": f"4px solid {eq_color}"},
+                )
+            else:
+                rates = [max(0.0, r) for r in raw_rates]
+
+                n = len(rates)
+                sum_r  = sum(rates)
+                sum_r2 = sum(r * r for r in rates)
+                if sum_r2 > 1e-12:
+                    jain = (sum_r ** 2) / (n * sum_r2)
+                    equidad_pct = max(0.0, min(100.0, jain * 100.0))
+                else:
+                    equidad_pct = 100.0
+
+                eq_color = "#27AE60" if equidad_pct >= 70 else ("#F39C12" if equidad_pct >= 40 else "#E74C3C")
+                eq_label = ("Distribución equitativa" if equidad_pct >= 70
+                            else ("Distribución moderada" if equidad_pct >= 40
+                                  else "Distribución desigual"))
+
+                equidad_display = dbc.Card(
+                    dbc.CardBody([
+                        html.Div([
+                            html.Div(
+                                html.I(className="bi bi-bar-chart-steps",
+                                       style={"fontSize": "16px", "color": eq_color}),
+                                style={"width": "36px", "height": "36px", "borderRadius": "8px",
+                                       "background": f"color-mix(in srgb, {eq_color} 12%, white)",
+                                       "display": "flex", "alignItems": "center",
+                                       "justifyContent": "center", "flexShrink": "0"},
+                            ),
+                            html.Div([
+                                html.Div("Índice de equidad de reparto", style={
+                                    "fontSize": "10px", "fontWeight": "700",
+                                    "color": "var(--text-muted)", "textTransform": "uppercase",
+                                    "letterSpacing": "0.5px", "marginBottom": "2px",
+                                }),
+                                html.Div([
+                                    html.Span(f"{formato_num(equidad_pct, 0)}%", style={
+                                        "fontSize": "26px", "fontWeight": "900",
+                                        "color": eq_color, "lineHeight": "1", "marginRight": "8px",
+                                    }),
+                                    html.Span(eq_label, style={
+                                        "fontSize": "13px", "color": eq_color, "fontWeight": "700",
+                                    }),
+                                ], style={"display": "flex", "alignItems": "baseline"}),
+                            ], style={"marginLeft": "12px"}),
+                        ], style={"display": "flex", "alignItems": "center",
+                                  "marginBottom": "8px"}),
+                        html.Div(
+                            "Un valor próximo al 100 % indica que el beneficio de la optimización "
+                            "se distribuye de forma proporcional a la demanda de cada miembro de la comunidad.",
+                            style={"fontSize": "11.5px", "color": "var(--text-muted)",
+                                   "lineHeight": "1.6"},
+                        ),
+                    ]),
+                    className="chart-card",
+                    style={"borderLeft": f"4px solid {eq_color}"},
+                )
 
         return (
             kpi_model_el, kpi_best_cost, kpi_saving_pct, kpi_co2,
@@ -1726,8 +1770,9 @@ def register_callbacks(app, cfg):
         for m in models:
             label  = m["Modelo"]
             tipo   = m.get("Tipo", "ex_ante")
-            prefix = ("alpha_ex_" if tipo == "ex_ante"
-                      else "alpha_fx_" if tipo == "fijo"
+            prefix = ("alpha_ex_"  if tipo == "ex_ante"
+                      else "alpha_fx_"  if tipo == "fijo"
+                      else "alpha_bat_" if tipo == "bateria"
                       else "alpha_prop_")
             ts     = get_serie(series, label)
             if ts.empty:
@@ -1735,8 +1780,10 @@ def register_callbacks(app, cfg):
             alpha_cols = sorted([c for c in ts.columns if c.startswith(prefix)])
             ud = m.get("users_display") or [f"U{i+1}" for i in range(len(alpha_cols))]
 
-            fv_mask = pd.to_numeric(ts.get("pv_kWh", pd.Series(dtype=float)),
-                                    errors="coerce").fillna(0) > 0.01
+            if "pv_kWh" in ts.columns:
+                fv_mask = pd.to_numeric(ts["pv_kWh"], errors="coerce").fillna(0) > 0.01
+            else:
+                fv_mask = pd.Series(True, index=ts.index)
             means = {}
             for i, col in enumerate(alpha_cols):
                 vals = pd.to_numeric(ts.loc[fv_mask, col], errors="coerce").dropna()
@@ -1782,7 +1829,6 @@ def register_callbacks(app, cfg):
                     cell_style = dict(td_base, background=bg, color="#94a3b8")
                 else:
                     txt = f"{val:.1%}"
-                    intensity = int(val * 180)
                     cell_style = dict(td_base, background=bg,
                                       color=color, fontWeight="600",
                                       fontSize="13px")
@@ -1819,19 +1865,21 @@ def register_callbacks(app, cfg):
             return [], None, None, None
         opts = [{"label": m["Modelo"], "value": m["Modelo"]} for m in data["models"]]
         default = opts[0]["value"] if opts else None
-        # deduce date range from any available series
         t_min = t_max = None
         for s in (data.get("series") or {}).values():
             rows = (s or {}).get("rows") or []
             if rows:
-                df_s = pd.DataFrame(rows)
-                tcol = col_tiempo(df_s)
+                first = rows[0]
+                tcol = next(
+                    (c for c in ["Time", "time", "timestamp", "datetime", "t"]
+                     if c in first),
+                    None,
+                )
                 if tcol:
-                    times = pd.to_datetime(df_s[tcol], errors="coerce").dropna()
+                    time_vals = [r[tcol] for r in rows if r.get(tcol) is not None]
+                    times = pd.to_datetime(time_vals, errors="coerce").dropna()
                     if not times.empty:
-                        lo, hi = times.min(), times.max()
-                        t_min = lo if t_min is None else min(t_min, lo)
-                        t_max = hi if t_max is None else max(t_max, hi)
+                        t_min, t_max = times.min(), times.max()
             break
         start_str = t_min.strftime("%Y-%m-%d") if t_min else None
         end_str   = t_max.strftime("%Y-%m-%d") if t_max else None
@@ -1885,7 +1933,6 @@ def register_callbacks(app, cfg):
         if not users_display:
             users_display = [f"Usuario {i+1}" for i in range(len(alpha_cols))]
 
-        # Resample to daily mean to keep the chart readable
         ts = ts.set_index(tcol)
         fig = go.Figure()
         for i, col in enumerate(alpha_cols):
@@ -1936,8 +1983,6 @@ def register_callbacks(app, cfg):
 
         series  = data["series"]
         models  = data.get("models", [])
-        # Usar la serie del modelo de menor coste (coherente con el panel KPI),
-        # si no hay modelos válidos, caer en el primero disponible.
         valid_models = [m for m in models if m.get("Coste (€)") is not None and m["Modelo"] in series]
         if valid_models:
             best_key = min(valid_models, key=lambda m: m["Coste (€)"])["Modelo"]
@@ -1994,7 +2039,7 @@ def register_callbacks(app, cfg):
         )
         if bat_model and bat_model.get("bat_efc") and bat_model["bat_efc"] > 0:
             efc_period       = float(bat_model["bat_efc"])
-            lifecycle_cycles = int(bat_model.get("bat_lifecycle_cycles") or 4000)
+            lifecycle_cycles = int(bat_model.get("bat_lifecycle_cycles") or 7000)
             vida_restante_pct = max(0.0, (1 - efc_period / lifecycle_cycles) * 100)
             fourth_tile = stat_tile("Vida restante bat.", f"{vida_restante_pct:.2f} %", "warning")
         else:
@@ -2248,13 +2293,16 @@ def register_callbacks(app, cfg):
         Input("battery-enabled", "value"),
     )
     def toggle_export_battery(results, battery_enabled):
-        if not (battery_enabled and "enabled" in battery_enabled):
+        try:
+            if not (battery_enabled and "enabled" in battery_enabled):
+                return False
+            models = (results or {}).get("models") or []
+            return any(
+                m.get("Tipo") == "bateria" and m.get("Coste (€)") is not None
+                for m in models
+            )
+        except Exception:
             return False
-        models = (results or {}).get("models") or []
-        return any(
-            m.get("Tipo") == "bateria" and m.get("Coste (€)") is not None
-            for m in models
-        )
 
     @app.callback(
         Output("seasonal-cards-row",       "children"),
@@ -2461,7 +2509,6 @@ def register_callbacks(app, cfg):
 
         ts["soc_pct"] = (ts["soc_bat"] / bat_cap_kwh * 100.0).clip(0, 100)
 
-        # Prepend initial SOC = 0 % (battery starts empty) one hour before the series
         t0 = ts[tcol].iloc[0]
         init_row = pd.DataFrame({tcol: [t0 - pd.Timedelta(hours=1)], "soc_pct": [0.0]})
         ts_plot = pd.concat([init_row, ts[[tcol, "soc_pct"]]], ignore_index=True)
@@ -2510,15 +2557,17 @@ def register_callbacks(app, cfg):
         Output("bat-financiero-empty",      "style"),
         Output("bat-fin-capacity-display",  "children"),
         Output("fin-results-store",         "data"),
-        Input("results-store",       "data"),
-        Input("bat-fin-cost-kwp",    "value"),
-        Input("bat-fin-om-pct",      "value"),
-        Input("bat-fin-inflation",   "value"),
-        Input("bat-fin-discount",    "value"),
-        Input("bat-fin-lifetime",    "value"),
-        State("bat-capacity",        "value"),
+        Output("bat-fig-comparison",        "figure"),
+        Output("bat-fin-capex-display",     "children"),
+        Output("bat-fin-lifetime-display",  "children"),
+        Input("results-store",         "data"),
+        Input("bat-fin-om-pct",        "value"),
+        Input("bat-fin-inflation",     "value"),
+        Input("bat-fin-discount",      "value"),
+        Input("bat-lifecycle-cycles",  "value"),
+        State("bat-capacity",          "value"),
     )
-    def render_financiero(data, cost_kwp, om_pct, inflation, discount, lifetime, bat_capacity_val):
+    def render_financiero(data, om_pct, inflation, discount, lifecycle_cycles_ui, bat_capacity_val):
         _no = grafico_vacio("Sin datos de análisis.")
         empty_style = {"display": "flex"}
         hidden_style = {"display": "none"}
@@ -2527,33 +2576,35 @@ def register_callbacks(app, cfg):
         cap_display = f"{optimal_cap:.0f} kWh"
 
         if not data or "models" not in data or not data["models"]:
-            return "—", "—", "—", "—", _no, _no, empty_style, cap_display, None
+            return "—", "—", "—", "—", _no, _no, empty_style, cap_display, None, _no, "—", "—"
 
         df_m = pd.DataFrame(data["models"])
         df_m["Coste (€)"] = pd.to_numeric(df_m["Coste (€)"], errors="coerce")
         df_m = df_m.dropna(subset=["Coste (€)"])
         if df_m.empty:
-            return "—", "—", "—", "—", _no, _no, empty_style, cap_display, None
+            return "—", "—", "—", "—", _no, _no, empty_style, cap_display, None, _no, "—", "—"
 
         horario_row = df_m[df_m["Modelo"] == "Dinámico Horario"]
         bat_row     = df_m[df_m["Tipo"]   == "bateria"]
         if horario_row.empty or bat_row.empty:
-            return "—", "—", "—", "—", _no, _no, empty_style, cap_display, None
+            return "—", "—", "—", "—", _no, _no, empty_style, cap_display, None, _no, "—", "—"
         cost_horario = float(horario_row.iloc[0]["Coste (€)"])
         cost_bat_val = float(bat_row.iloc[0]["Coste (€)"])
-        annual_savings = max(cost_horario - cost_bat_val, 0.0)
+        annual_savings = cost_horario - cost_bat_val
 
-        cost_kwp_v  = float(cost_kwp)  if cost_kwp  is not None else 250.0
-        om_pct_v    = (float(om_pct)   if om_pct    is not None else 2.5)  / 100.0
+        bat_efc_sim      = float(bat_row.iloc[0].get("bat_efc", 0) or 0)
+        lifecycle_cycles = int(lifecycle_cycles_ui or bat_row.iloc[0].get("bat_lifecycle_cycles", 7000) or 7000)
+        cost_kwp_v       = float(bat_row.iloc[0].get("bat_capex_kwh", 250) or 250)
+        lifetime_v       = max(1, int(round(lifecycle_cycles / bat_efc_sim))) if bat_efc_sim > 0 else 15
+        capex_display    = f"{cost_kwp_v:.0f} €/kWh"
+        lifetime_display = f"{lifetime_v} años"
+
+        om_pct_v    = (float(om_pct)   if om_pct    is not None else 3.0)  / 100.0
         inflation_v = (float(inflation) if inflation is not None else 3.0) / 100.0
         discount_v  = (float(discount)  if discount  is not None else 5.0) / 100.0
-        lifetime_v  = int(lifetime)     if lifetime  is not None else 15
 
         investment   = cost_kwp_v * max(optimal_cap, 1.0)
         om_annual    = investment * om_pct_v
-
-        if annual_savings <= 0:
-            return "Sin ahorro", "—", "—", "0 €/año", _no, _no, hidden_style, cap_display, None
 
         cumulative = [-investment]
         years      = list(range(lifetime_v + 1))
@@ -2568,10 +2619,11 @@ def register_callbacks(app, cfg):
             om_yr       = om_annual * infl_factor
             net_yr      = savings_yr - om_yr
             disc_factor = (1 + discount_v) ** yr
-            npv        += net_yr / disc_factor
+            pv_net_yr   = net_yr / disc_factor
+            npv        += pv_net_yr
             pv_savings += savings_yr / disc_factor
             pv_om      += om_yr / disc_factor
-            cumulative.append(cumulative[-1] + net_yr)
+            cumulative.append(cumulative[-1] + pv_net_yr)
             if payback_yr is None and cumulative[-1] >= 0:
                 prev = cumulative[-2]
                 curr = cumulative[-1]
@@ -2605,18 +2657,25 @@ def register_callbacks(app, cfg):
         if payback_yr is None:
             c = cumulative[-1]
             for yr in range(lifetime_v + 1, 101):
-                infl_factor = (1 + inflation_v) ** (yr - 1)
-                net_yr      = annual_savings * infl_factor - om_annual * infl_factor
+                infl_factor  = (1 + inflation_v) ** (yr - 1)
+                disc_factor  = (1 + discount_v) ** yr
+                net_yr       = annual_savings * infl_factor - om_annual * infl_factor
                 prev = c
-                c   += net_yr
+                c   += net_yr / disc_factor
                 if c >= 0:
                     payback_yr = (yr - 1) + (-prev) / (c - prev) if c != prev else float(yr)
                     break
 
+        if discount_v > 0 and lifetime_v > 0:
+            annuity_factor = (1 - (1 + discount_v) ** (-lifetime_v)) / discount_v
+            eaa = npv / annuity_factor if annuity_factor > 0 else npv / lifetime_v
+        else:
+            eaa = npv / lifetime_v if lifetime_v > 0 else 0.0
+
         kpi_pb  = f"{formato_num(payback_yr, 1)} años" if payback_yr is not None else "> 100 años"
         kpi_npv = f"{formato_num(npv, 0)} €"
         kpi_irr = f"{formato_num(irr * 100, 1)} %" if irr else "—"
-        kpi_sav = f"{formato_num(annual_savings, 0)} €/año"
+        kpi_sav = f"{formato_num(eaa, 0)} €/año"
 
         fig_cf = go.Figure()
 
@@ -2649,7 +2708,7 @@ def register_callbacks(app, cfg):
                 annotation_bordercolor="rgba(251,191,36,0.4)",
                 annotation_borderpad=4,
             )
-        estilo_grafico(fig_cf, y_title="€ acumulados")
+        estilo_grafico(fig_cf, y_title="€ acumulados (valor actual)")
         fig_cf.update_xaxes(title_text="Año", dtick=5)
         fig_cf.update_yaxes(tickformat="+,.0f")
         fig_cf.update_layout(
@@ -2733,9 +2792,105 @@ def register_callbacks(app, cfg):
                 "lifetime":     lifetime_v,
             },
         }
-        return kpi_pb, kpi_npv, kpi_irr, kpi_sav, fig_cf, fig_wf, hidden_style, cap_display, fin_store
 
-    def render_bat_optimal(data):  # disabled – kept for reference
+        ref_rows_fin = df_m[df_m["Modelo"].isin(["Ex ante RD 244/2019", "Ex ante Rígido"])]
+        cost_ref_fin = float(ref_rows_fin.iloc[0]["Coste (€)"]) if not ref_rows_fin.empty else None
+
+        denom_pct    = cost_ref_fin if (cost_ref_fin and cost_ref_fin > 0) else (cost_horario if cost_horario > 0 else 1.0)
+
+        sav_pct_horario = (cost_ref_fin - cost_horario) / denom_pct * 100 if cost_ref_fin else 0.0
+        ann_pct_solo    = [sav_pct_horario] * lifetime_v
+
+        sav_bat_annual = cost_horario - cost_bat_val
+
+        years_c     = list(range(1, lifetime_v + 1))
+        ann_pct_bat = []
+        cum_bat_v   = -investment
+        for yr in range(1, lifetime_v + 1):
+            infl_factor = (1 + inflation_v) ** (yr - 1)
+            disc_factor = (1 + discount_v) ** yr
+            net_yr      = (sav_bat_annual - om_annual) * infl_factor
+            cum_bat_v  += net_yr / disc_factor
+            ann_pct_bat.append(cum_bat_v / yr / denom_pct * 100)
+
+        graph_zero_yr = None
+        for i in range(1, len(ann_pct_bat)):
+            if ann_pct_bat[i - 1] < 0 <= ann_pct_bat[i]:
+                t = -ann_pct_bat[i - 1] / (ann_pct_bat[i] - ann_pct_bat[i - 1])
+                graph_zero_yr = years_c[i - 1] + t
+                break
+
+        y_ceil  = round(max(ann_pct_bat[-1], sav_pct_horario) + 3, 0)
+        y_floor = max(ann_pct_bat[0] / 3.0, -60.0)
+
+        fig_comp = go.Figure()
+
+        fig_comp.add_hline(y=0, line_dash="dot",
+                           line_color="rgba(100,116,139,0.45)", line_width=1.5)
+        fig_comp.add_hline(y=sav_pct_horario, line_dash="dot",
+                           line_color="rgba(99,102,241,0.4)", line_width=1.2)
+
+        fig_comp.add_trace(go.Scatter(
+            x=years_c, y=ann_pct_solo,
+            name="Dinámico Horario",
+            mode="lines",
+            line=dict(color="#6366F1", width=2, dash="dash"),
+            hovertemplate="<b>Año %{x}</b><br>Ahorro: <b>%{y:.2f} %</b><extra></extra>",
+        ))
+        fig_comp.add_trace(go.Scatter(
+            x=years_c, y=ann_pct_bat,
+            name="Dinámico con batería",
+            mode="lines",
+            line=dict(color="#18BC9C", width=2.5),
+            hovertemplate="<b>Año %{x}</b><br>Ahorro anualizado: <b>%{y:.2f} %</b><extra></extra>",
+        ))
+
+        if graph_zero_yr is not None:
+            fig_comp.add_vline(
+                x=graph_zero_yr,
+                line_dash="dash",
+                line_color="#F59E0B",
+                line_width=2,
+                annotation_text=f"Payback: año {formato_num(graph_zero_yr, 1)}",
+                annotation_position="top right",
+                annotation_font=dict(size=11, color="#92400e", family="Inter, sans-serif"),
+                annotation_bgcolor="rgba(251,191,36,0.15)",
+                annotation_bordercolor="rgba(251,191,36,0.4)",
+                annotation_borderpad=4,
+            )
+
+        fig_comp.add_annotation(
+            x=years_c[-1], y=ann_pct_solo[-1],
+            text=f"<b>{formato_num(ann_pct_solo[-1], 2)} %</b>",
+            showarrow=False, xanchor="left", yanchor="middle", xshift=8,
+            font=dict(size=12, color="#6366F1", family="Inter, sans-serif"),
+        )
+        fig_comp.add_annotation(
+            x=years_c[-1], y=ann_pct_bat[-1],
+            text=f"<b>{formato_num(ann_pct_bat[-1], 2)} %</b>",
+            showarrow=False, xanchor="left", yanchor="middle", xshift=8,
+            font=dict(size=12, color="#18BC9C", family="Inter, sans-serif"),
+        )
+        estilo_grafico(fig_comp, y_title="Ahorro anualizado descontado (%)")
+        fig_comp.update_xaxes(title_text="Año", dtick=5)
+        fig_comp.update_yaxes(ticksuffix=" %", range=[y_floor, y_ceil])
+        fig_comp.update_layout(
+            margin=dict(l=10, r=70, t=10, b=30),
+            showlegend=True,
+            legend=dict(
+                orientation="h", yanchor="bottom", y=1.02,
+                xanchor="right", x=1,
+                font=dict(size=11, family="Inter, sans-serif"),
+                bgcolor="rgba(0,0,0,0)",
+            ),
+            plot_bgcolor="rgba(0,0,0,0)",
+        )
+
+        return (kpi_pb, kpi_npv, kpi_irr, kpi_sav,
+                fig_cf, fig_wf, hidden_style, cap_display, fin_store,
+                fig_comp, capex_display, lifetime_display)
+
+    def render_bat_optimal(data):
         _no = grafico_vacio("Ejecuta el modelo para ver la capacidad óptima.")
         _empty_kpi = html.Div("—", style={"fontSize": "28px", "fontWeight": "900",
                                            "color": "var(--text-muted)"})
@@ -2880,7 +3035,7 @@ def register_callbacks(app, cfg):
         ], style={"padding": "2px 0"})
         return fig, kpi_el, {"optimal_cap": optimal_cap, "optimal_sav": optimal_sav}
 
-    def render_scenarios(n, data, pv_range):  # disabled – kept for reference
+    def render_scenarios(n, data, pv_range):
         _no = grafico_vacio("Ejecuta el análisis de escenarios.")
         empty_style  = {"display": "flex"}
         hidden_style = {"display": "none"}
