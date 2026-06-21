@@ -1,5 +1,4 @@
 import logging
-import sys
 import pandas as pd
 from pyomo.environ import (
     ConcreteModel, RangeSet, Param, Var, Constraint, Objective, minimize,
@@ -15,11 +14,10 @@ _log = logging.getLogger("TFG")
 
 def probar_solver(name):
     s = SolverFactory(name)
-    _saved_out, _saved_err = sys.stdout, sys.stderr
     try:
         ok = (s is not None) and s.available(exception_flag=False)
-    finally:
-        sys.stdout, sys.stderr = _saved_out, _saved_err
+    except Exception:
+        ok = False
     return s, ok
 
 
@@ -237,11 +235,7 @@ def resolver_lp(df, users, b_of_t, B, solver, tee, logger, step_num=5, datos=Non
 
     m.obj = Objective(rule=obj_rule, sense=minimize)
     logger.info(f"  [{s}.2] lanzando solver...")
-    _saved_out, _saved_err = sys.stdout, sys.stderr
-    try:
-        solver.solve(m, tee=tee)
-    finally:
-        sys.stdout, sys.stderr = _saved_out, _saved_err
+    solver.solve(m, tee=tee)
     obj_val = float(value(m.obj))
     logger.info(f"  [{s}.3] solver completado | obj={obj_val:.4f} €")
 
@@ -431,11 +425,7 @@ def resolver_lp_bateria(
     m.obj = Objective(rule=obj_rule, sense=minimize)
 
     logger.info(f"  [{s}.2] lanzando solver (con batería)...")
-    _saved_out, _saved_err = sys.stdout, sys.stderr
-    try:
-        solver.solve(m, tee=tee)
-    finally:
-        sys.stdout, sys.stderr = _saved_out, _saved_err
+    solver.solve(m, tee=tee)
     obj_val = float(value(m.obj))
     logger.info(f"  [{s}.3] solver completado | obj={obj_val:.4f} €")
 
